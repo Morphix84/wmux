@@ -5,7 +5,10 @@ import path from "node:path";
 import { test } from "node:test";
 import { configSchema, loadConfig } from "../src/server/config.js";
 import { defaultKeybindings } from "../src/shared/keybindings.js";
-import { DEFAULT_DELEGATION_WAIT_TIMEOUT_SECONDS } from "../src/shared/protocol.js";
+import {
+  DEFAULT_DELEGATION_NOTIFICATION_BUDGET_SECONDS,
+  DEFAULT_DELEGATION_WAIT_TIMEOUT_SECONDS,
+} from "../src/shared/protocol.js";
 
 const machine = (overrides: Record<string, unknown>) => ({
   machines: [{ id: "box", name: "Box", kind: "ssh", host: "box.ts.net", user: "me", ...overrides }],
@@ -53,6 +56,10 @@ test("validates terminal typography defaults", () => {
 
 test("delegation wait defaults are mode-aware and config overrides are bounded", () => {
   assert.deepEqual(loadConfig().delegation.waitTimeoutSeconds, DEFAULT_DELEGATION_WAIT_TIMEOUT_SECONDS);
+  assert.deepEqual(
+    loadConfig().delegation.notificationBudgetSeconds,
+    DEFAULT_DELEGATION_NOTIFICATION_BUDGET_SECONDS,
+  );
   assert.equal(loadConfig().delegation.preferHeadless, false);
   const parsed = configSchema.parse({
     delegation: {
@@ -62,10 +69,18 @@ test("delegation wait defaults are mode-aware and config overrides are bounded",
         change: 7_200,
         deploy: 10_800,
       },
+      notificationBudgetSeconds: {
+        running: 3_600,
+        waiting: 120,
+      },
     },
   });
   assert.equal(parsed.delegation?.preferHeadless, true);
   assert.equal(parsed.delegation?.waitTimeoutSeconds?.review, 900);
+  assert.equal(
+    parsed.delegation?.notificationBudgetSeconds?.waiting,
+    120,
+  );
   for (const timeout of [0, 14_401, Number.POSITIVE_INFINITY, "7200"]) {
     assert.equal(configSchema.safeParse({
       delegation: { waitTimeoutSeconds: { change: timeout } },
@@ -77,6 +92,11 @@ test("delegation wait defaults are mode-aware and config overrides are bounded",
   assert.equal(configSchema.safeParse({
     delegation: { waitTimeoutSeconds: { review: 1_800, arbitrary: 60 } },
   }).success, false);
+  for (const budget of [0, 604_801, Number.POSITIVE_INFINITY, "300"]) {
+    assert.equal(configSchema.safeParse({
+      delegation: { notificationBudgetSeconds: { waiting: budget } },
+    }).success, false);
+  }
 });
 
 test("rejects machine ids that could escape scripts, paths, or URLs", () => {

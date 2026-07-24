@@ -227,6 +227,7 @@ test("delegation status API returns persisted lifecycle results by run id", asyn
     delegation: {
       preferHeadless: false,
       waitTimeoutSeconds: { review: 900, change: 7_200, deploy: 10_800 },
+      notificationBudgetSeconds: { running: 7_200, waiting: 300 },
       waitTimeoutBoundsSeconds: { min: 0.1, max: 14_400 },
     },
     agentSessions,
@@ -249,6 +250,7 @@ test("delegation status API returns persisted lifecycle results by run id", asyn
       true,
     );
     assert.deepEqual(bootstrap.delegation.waitTimeoutSeconds, { review: 900, change: 7_200, deploy: 10_800 });
+    assert.deepEqual(bootstrap.delegation.notificationBudgetSeconds, { running: 7_200, waiting: 300 });
     assert.deepEqual(bootstrap.delegation.waitTimeoutBoundsSeconds, { min: 0.1, max: 14_400 });
 
     const response = await fetch(`http://127.0.0.1:${port}/api/delegations/run-http-1`, {

@@ -21,6 +21,7 @@ export interface AgentFleetRow {
   machineName: string;
   state: DelegationRecord["state"];
   attentionReason?: DelegationAttentionReason;
+  stateChangedAt: string;
   updatedAt: string;
   lastEntry?: AgentTimelineEntry;
 }
@@ -72,6 +73,7 @@ export const buildAgentFleetRows = (
         ...(delegation.attentionReason
           ? { attentionReason: delegation.attentionReason }
           : {}),
+        stateChangedAt: delegation.stateChangedAt,
         updatedAt: delegation.updatedAt,
         lastEntry: timeline?.entries.at(-1),
       };
@@ -193,7 +195,7 @@ export function AgentFleet({
                 {row.machineName}
               </span>
               <span className="agent-fleet-elapsed">
-                {formatFleetElapsed(row.updatedAt, nowMs)}
+                {formatFleetElapsed(row.stateChangedAt, nowMs)}
               </span>
               <span className="agent-fleet-entry">
                 {compactFleetText(

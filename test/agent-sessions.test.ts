@@ -167,3 +167,78 @@ test("attention transitions are explicit, prioritized, and notified once", () =>
     assert.equal(state.snapshot().notifications.length, 2);
   });
 });
+
+test("state-age budgets notify once with the transition timeline entry", () => {
+  withAgentSessions((state, agents) => {
+    const paneId = state.snapshot().workspaces[0].tabs[0].panes[0].id;
+    agents.recordAgentEvent({
+      paneId,
+      runId: "run-budget",
+      sessionId: "session-budget",
+      agent: "codex",
+      status: "running",
+      summary: "Running repository checks",
+      prompt: "Verify the repository.",
+    });
+    const running = agents.delegationForRun("run-budget");
+    assert.ok(running);
+    const runningNotifications = agents.notifyExceededStateBudgets(
+      { running: 1, waiting: 1 },
+      Date.parse(running.stateChangedAt) + 1_001,
+    );
+    assert.equal(runningNotifications.length, 1);
+    assert.equal(
+      runningNotifications[0].subtitle,
+      "running budget exceeded",
+    );
+    assert.equal(
+      runningNotifications[0].body,
+      "Running repository checks",
+    );
+    assert.equal(
+      agents.notifyExceededStateBudgets(
+        { running: 1, waiting: 1 },
+        Date.parse(running.stateChangedAt) + 2_000,
+      ).length,
+      0,
+    );
+
+    const waitingEvent = agents.recordAgentEvent({
+      paneId,
+      runId: "run-budget",
+      sessionId: "session-budget",
+      agent: "codex",
+      status: "waiting",
+      attentionReason: "login",
+      summary: "Sign in to the remote runtime",
+    });
+    assert.equal(waitingEvent.notification?.subtitle, "login required");
+    const waiting = agents.delegationForRun("run-budget");
+    assert.ok(waiting);
+    assert.notEqual(waiting.stateChangedAt, running.stateChangedAt);
+    assert.equal(waiting.budgetNotifiedAt, undefined);
+
+    const waitingNotifications = agents.notifyExceededStateBudgets(
+      { running: 1, waiting: 1 },
+      Date.parse(waiting.stateChangedAt) + 1_001,
+    );
+    assert.equal(waitingNotifications.length, 1);
+    assert.equal(
+      waitingNotifications[0].subtitle,
+      "waiting budget exceeded",
+    );
+    assert.equal(
+      waitingNotifications[0].body,
+      "Sign in to the remote runtime",
+    );
+
+    const reloaded = new AgentSessionService(state);
+    assert.equal(
+      reloaded.notifyExceededStateBudgets(
+        { running: 1, waiting: 1 },
+        Date.parse(waiting.stateChangedAt) + 2_000,
+      ).length,
+      0,
+    );
+  });
+});

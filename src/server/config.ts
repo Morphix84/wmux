@@ -11,9 +11,12 @@ import {
   type KeybindingOverrides,
 } from "../shared/keybindings.js";
 import {
+  DEFAULT_DELEGATION_NOTIFICATION_BUDGET_SECONDS,
   DEFAULT_DELEGATION_WAIT_TIMEOUT_SECONDS,
+  MAX_DELEGATION_NOTIFICATION_BUDGET_SECONDS,
   MAX_DELEGATION_WAIT_TIMEOUT_SECONDS,
   MAX_TERMINAL_FONT_SIZE,
+  MIN_DELEGATION_NOTIFICATION_BUDGET_SECONDS,
   MIN_DELEGATION_WAIT_TIMEOUT_SECONDS,
   MIN_TERMINAL_FONT_SIZE,
   type DelegationConfig,
@@ -105,6 +108,10 @@ const delegationWaitTimeoutSchema = z.number()
   .finite()
   .min(MIN_DELEGATION_WAIT_TIMEOUT_SECONDS)
   .max(MAX_DELEGATION_WAIT_TIMEOUT_SECONDS);
+const delegationNotificationBudgetSchema = z.number()
+  .finite()
+  .min(MIN_DELEGATION_NOTIFICATION_BUDGET_SECONDS)
+  .max(MAX_DELEGATION_NOTIFICATION_BUDGET_SECONDS);
 
 const delegationSchema = z.object({
   preferHeadless: z.boolean().optional(),
@@ -112,6 +119,10 @@ const delegationSchema = z.object({
     review: delegationWaitTimeoutSchema.optional(),
     change: delegationWaitTimeoutSchema.optional(),
     deploy: delegationWaitTimeoutSchema.optional(),
+  }).strict().optional(),
+  notificationBudgetSeconds: z.object({
+    running: delegationNotificationBudgetSchema.optional(),
+    waiting: delegationNotificationBudgetSchema.optional(),
   }).strict().optional(),
 }).strict();
 
@@ -145,11 +156,16 @@ export interface AppConfig {
 const resolveDelegationConfig = (
   configured?: Partial<Record<DelegationMode, number>>,
   preferHeadless = false,
+  notificationBudgets?: Partial<DelegationConfig["notificationBudgetSeconds"]>,
 ): DelegationConfig => ({
   preferHeadless,
   waitTimeoutSeconds: {
     ...DEFAULT_DELEGATION_WAIT_TIMEOUT_SECONDS,
     ...configured,
+  },
+  notificationBudgetSeconds: {
+    ...DEFAULT_DELEGATION_NOTIFICATION_BUDGET_SECONDS,
+    ...notificationBudgets,
   },
   waitTimeoutBoundsSeconds: {
     min: MIN_DELEGATION_WAIT_TIMEOUT_SECONDS,
@@ -178,6 +194,7 @@ export const loadConfig = (): AppConfig => {
       delegation: resolveDelegationConfig(
         parsed.delegation?.waitTimeoutSeconds,
         parsed.delegation?.preferHeadless,
+        parsed.delegation?.notificationBudgetSeconds,
       ),
     };
   }
