@@ -16,7 +16,7 @@ export type SettingsSurface = "opentui" | "dom";
 export const defaultSettings: WmuxSettings = {
   terminalFontSize: 14,
   terminalScrollbackRows: 10_000,
-  colorScheme: "wmux",
+  colorScheme: "flock",
   inactiveTabStreaming: "suspend",
   tuiFrameRate: 15,
   terminalScrollMode: "batched",

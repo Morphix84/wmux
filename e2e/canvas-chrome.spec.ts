@@ -126,7 +126,7 @@ test("mobile boot profiles cannot tint browser safe-area chrome", async ({ page 
   });
 
   expect(bootColors).toEqual({
-    screen: "rgb(16, 17, 20)",
+    screen: "rgb(12, 13, 15)",
     bezel: "rgb(85, 204, 238)",
     padding: ["31px", "13px", "29px", "17px"],
   });

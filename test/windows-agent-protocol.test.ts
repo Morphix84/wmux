@@ -199,13 +199,21 @@ with tempfile.TemporaryDirectory() as state_dir:
     supervisor.start()
     deadline = time.monotonic() + 5
     starts = 0
+    settled = False
     while time.monotonic() < deadline:
         try:
             with open(counter_path, "r", encoding="utf-8") as handle:
                 starts = len(handle.readlines())
         except OSError:
             starts = 0
-        if starts >= 2:
+        current = supervisor.snapshot()
+        settled = (
+            starts >= 2
+            and current["restartCount"] >= 2
+            and current["lastExitCode"] == 7
+            and not current["running"]
+        )
+        if settled:
             break
         time.sleep(0.05)
     supervisor.stop()
@@ -218,6 +226,7 @@ with tempfile.TemporaryDirectory() as state_dir:
     rollout_snapshot = rollout.snapshot()
 print(json.dumps({
     "starts": starts,
+    "settled": settled,
     "snapshot": snapshot,
     "rollout": rollout_snapshot,
 }))
@@ -230,6 +239,7 @@ print(json.dumps({
   assert.equal(result.status, 0, result.stderr);
   const payload = JSON.parse(result.stdout);
   assert.equal(payload.starts, 2);
+  assert.equal(payload.settled, true);
   assert.ok(payload.snapshot.restartCount >= 1);
   assert.equal(payload.snapshot.running, false);
   assert.equal(payload.snapshot.lastExitCode, 7);

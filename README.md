@@ -456,6 +456,7 @@ Automation, helper, registration, and registered-host credentials cannot access 
   indicators stay hidden unless an underlying runtime or helper update is
   needed.
 - Settings persist in `~/.wmux/settings.json` and include an app-wide color scheme shared by terminal, canvas and DOM chrome, dialogs, and browser chrome; terminal font size, scrollback, user-facing host aliases, inactive-tab streaming, and terminal scroll mode.
+- Fresh installs use the low-contrast Flock scheme, while the original wmux palette and the bundled terminal schemes remain available in Settings.
   Hidden cached tabs suspend terminal sockets by default while preserving their mounted terminal views; choose live streaming to retain the previous behavior.
   The terminal font family remains config-owned.
 - New local, SSH, and Windows panes receive the selected scheme as

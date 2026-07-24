@@ -95,8 +95,8 @@ interface HitZone {
   title: string;
 }
 
-const runningFrames = ["|", "/", "-", "\\"];
-const statusBullet = "•";
+const runningFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const statusBullet = "●";
 
 interface SidebarRenderModel {
   targetMachineId: string;
@@ -520,6 +520,18 @@ const drawSidebarGrid = (
   row++;
 
   section(row, "workspaces");
+  const activeAgentCount = model.workspaces.filter((workspace) =>
+    workspace.agentStatus === "running" || workspace.agentStatus === "waiting").length;
+  const workspaceCountLabel = activeAgentCount > 0
+    ? `${model.workspaces.length} / ${activeAgentCount} ACTIVE`
+    : `${model.workspaces.length}`;
+  write(
+    row,
+    Math.max(13, cols - workspaceCountLabel.length - 1),
+    workspaceCountLabel,
+    activeAgentCount > 0 ? rgba.goldDim : rgba.faint,
+    700,
+  );
   row++;
   const filterName = model.hostFilter === "all"
     ? "all hosts"
@@ -534,11 +546,13 @@ const drawSidebarGrid = (
     row += 2;
   } else {
     for (const workspace of model.workspaces.slice(model.workspaceScrollOffset)) {
-      const meta = workspace.descriptor;
-      const hostContext = workspace.agentName ? `${workspace.host} / ${workspace.agentName}` : workspace.host;
-      const descriptionLines = wrapText(meta, Math.max(8, cols - 7), 3);
+      const statusContext = [
+        workspace.agentStatus ? sidebarAgentStatusLabel[workspace.agentStatus] : "",
+        workspace.agentName,
+      ].filter(Boolean);
+      const statusContextLine = statusContext.join(" · ");
       const cwd = workspace.cwd?.trim() ?? "";
-      const itemRows = 1 + descriptionLines.length + 1 + (cwd ? 1 : 0);
+      const itemRows = 3;
       if (row + itemRows >= workspaceEndRow) break;
       const itemStart = row;
       const statusColor = workspace.agentStatus
@@ -548,14 +562,20 @@ const drawSidebarGrid = (
         ? runningFrames[model.animationTick]
         : workspace.agentStatus === "waiting"
           ? "?"
-          : statusBullet;
+          : workspace.agentStatus === "completed"
+            ? "✓"
+            : workspace.agentStatus === "failed"
+              ? "×"
+              : workspace.reachable
+                ? statusBullet
+                : "○";
       const inactiveBackground = workspace.agentStatus
         ? inactiveAgentBackgrounds[workspace.agentStatus]
         : rgba.black;
       for (let offset = 0; offset < itemRows; offset += 1) {
         fillRow(row + offset, workspace.active ? (offset === 0 ? rgba.active : rgba.activeSoft) : inactiveBackground);
+        if (workspace.active) write(row + offset, 0, "▌", rgba.gold, 700);
       }
-      fillRow(row, workspace.active ? rgba.active : inactiveBackground);
       const indent = Math.min(workspace.depth, 3) * 2;
       write(row, 1, workspace.active ? ">" : " ", workspace.active ? rgba.gold : rgba.faint, 700);
       if (workspace.hasChildren) {
@@ -604,17 +624,31 @@ const drawSidebarGrid = (
         actionCells(row, Math.max(titleCol, suffixCol - 2), 1, `Move ${workspace.title} out one level`, { type: "outdent-workspace", workspaceId: workspace.id });
       }
       row++;
-      for (const line of descriptionLines) {
-        if ((workspace.bell || workspace.hiddenBell) && row === itemStart + 1) write(row, 5 + indent, workspace.hiddenBell ? "!*" : "!", rgba.gold, 700);
-        write(row, 7 + indent, line, rgba.muted);
-        row++;
+      if (workspace.bell || workspace.hiddenBell) {
+        write(row, 5 + indent, workspace.hiddenBell ? "!*" : "!", rgba.gold, 700);
       }
-      write(row, 7 + indent, `host ${hostContext}`, rgba.faint);
+      const detailCol = 7 + indent;
+      if (statusContextLine) {
+        write(row, detailCol, statusContextLine, statusColor);
+      }
+      if (workspace.descriptor) {
+        const descriptorCol = detailCol + (statusContextLine ? statusContextLine.length + 3 : 0);
+        if (statusContextLine) write(row, detailCol + statusContextLine.length, " · ", rgba.faint);
+        write(row, descriptorCol, workspace.descriptor, rgba.muted);
+      } else if (!statusContextLine) {
+        write(row, detailCol, "shell", rgba.muted);
+      }
       row++;
+      const contextCol = 7 + indent;
+      write(row, contextCol, workspace.host, rgba.faint);
       if (cwd) {
-        writeCompactPath(row, 7 + indent, cwd);
-        row++;
+        const pathCol = contextCol + workspace.host.length + 3;
+        if (pathCol < cols - 4) {
+          write(row, contextCol + workspace.host.length, " · ", rgba.faint);
+          writeCompactPath(row, pathCol, cwd);
+        }
       }
+      row++;
       actionRows(
         itemStart,
         itemRows,
@@ -652,29 +686,16 @@ const agentStatusAbbreviation: Record<WorkspaceAgentStatus, string> = {
   updated: "U",
 };
 
+const sidebarAgentStatusLabel: Record<NonNullable<OpenTuiSidebarWorkspace["agentStatus"]>, string> = {
+  running: "working",
+  waiting: "waiting",
+  completed: "done",
+  failed: "failed",
+  updated: "updated",
+};
+
 const sameSemanticRows = (left: SemanticWorkspaceRow[], right: SemanticWorkspaceRow[]): boolean =>
   left.length === right.length && left.every((row, index) => {
     const candidate = right[index];
     return candidate && row.workspace === candidate.workspace && row.row === candidate.row && row.rowCount === candidate.rowCount;
   });
-
-const wrapText = (text: string, maxCells: number, maxLines: number): string[] => {
-  if (maxCells <= 0 || maxLines <= 0) return [];
-  const words = text.trim().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return [];
-  const lines: string[] = [];
-  let current = "";
-  for (const word of words) {
-    const safeWord = word.length > maxCells ? word.slice(0, maxCells) : word;
-    const next = current ? `${current} ${safeWord}` : safeWord;
-    if (next.length <= maxCells) {
-      current = next;
-      continue;
-    }
-    if (current) lines.push(current);
-    current = safeWord;
-    if (lines.length === maxLines) break;
-  }
-  if (current && lines.length < maxLines) lines.push(current);
-  return lines.slice(0, maxLines).map((line) => fitText(line, maxCells));
-};

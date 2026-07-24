@@ -10,6 +10,7 @@ export type StreamReasonKind = "provider" | "gateway" | "upstream" | "target";
 export type MachineVersionStatus = "current" | "outdated" | "unknown";
 export const TERMINAL_COLOR_SCHEME_IDS = [
   "wmux",
+  "flock",
   "catppuccin-mocha",
   "dracula",
   "nord",
@@ -21,6 +22,7 @@ export type TerminalColorSchemeId = (typeof TERMINAL_COLOR_SCHEME_IDS)[number];
 export type TerminalColorMode = "dark" | "light";
 export const TERMINAL_COLOR_SCHEME_MODES: Record<TerminalColorSchemeId, TerminalColorMode> = {
   wmux: "dark",
+  flock: "dark",
   "catppuccin-mocha": "dark",
   dracula: "dark",
   nord: "dark",

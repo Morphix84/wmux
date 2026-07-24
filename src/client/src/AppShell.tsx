@@ -1590,7 +1590,7 @@ export function AppShell() {
                 latestAgentStatusLabel,
               );
               const host = displayWorkspaceHost(machine, sourceMachine, presentationMachineId);
-              const hostContext = latestAgentName ? `${host} / ${latestAgentName}` : host;
+              const hostContext = latestAgentName ? `${host} · ${latestAgentName}` : host;
               const visibleDescriptor = compactWorkspaceDescription(descriptor, 72);
               const tooltipDescriptor = compactWorkspaceDescription(descriptor, 200);
               const version = summarizeWorkspaceVersion(workspace, displayMachines);

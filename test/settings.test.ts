@@ -31,7 +31,7 @@ test("legacy settings migrate while preserving normalized values", () => {
     assert.deepEqual(store.snapshot(), {
       terminalFontSize: 19,
       terminalScrollbackRows: 5000,
-      colorScheme: "wmux",
+      colorScheme: "flock",
       inactiveTabStreaming: "suspend",
       tuiFrameRate: 15,
       terminalScrollMode: "batched",
@@ -67,7 +67,7 @@ test("version 1 and version 2 settings migrate to inactive tab suspension", () =
       machineAliases: {},
     }));
     const store = new SettingsStore(filePath);
-    assert.equal(store.snapshot().colorScheme, "wmux");
+    assert.equal(store.snapshot().colorScheme, "flock");
     assert.equal(store.snapshot().inactiveTabStreaming, "suspend");
     assert.equal(JSON.parse(fs.readFileSync(filePath, "utf8")).schemaVersion, CURRENT_SETTINGS_SCHEMA_VERSION);
   });
@@ -102,7 +102,7 @@ test("settings persist supported schemes and normalize unknown values", () => {
       schemaVersion: CURRENT_SETTINGS_SCHEMA_VERSION,
       colorScheme: "not-a-scheme",
     }));
-    assert.equal(new SettingsStore(filePath).snapshot().colorScheme, "wmux");
+    assert.equal(new SettingsStore(filePath).snapshot().colorScheme, "flock");
     assert.equal(new SettingsStore(filePath).snapshot().inactiveTabStreaming, "suspend");
   });
 });
