@@ -9,6 +9,7 @@ import {
 
 const MAX_UPLOAD_BODY = 12 * 1024 * 1024;
 const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+const MAX_KITTY_SOURCE_REQUEST_BODY = 16 * 1024;
 
 const attachmentExtensions: Record<string, string> = {
   "image/png": "png",
@@ -200,6 +201,41 @@ export const mediaRoutes: readonly ApiRoute[] = [
         text: body.text,
       });
       sendJson(201, { clipboard });
+    },
+  },
+  {
+    id: "pane-kitty-graphics-source",
+    method: "POST",
+    pattern: /^\/api\/panes\/([^/]+)\/kitty-graphics\/source$/,
+    policy: routePolicy(
+      "pane-kitty-graphics-source",
+      "POST",
+      /^\/api\/panes\/[^/]+\/kitty-graphics\/source$/,
+    ),
+    handler: async ({ deps, match, readJsonBody, response }) => {
+      if (!match) throw new Error("Kitty graphics source route matched without captures");
+      const body = (await readJsonBody(MAX_KITTY_SOURCE_REQUEST_BODY)) as {
+        medium?: unknown;
+        source?: unknown;
+        size?: unknown;
+        offset?: unknown;
+      };
+      const data = await deps.sessions.readKittyGraphicsSource(
+        decodeURIComponent(match[1]),
+        {
+          medium: body.medium as "f" | "t" | "s",
+          source: body.source as string,
+          ...(body.size === undefined ? {} : { size: body.size as number }),
+          ...(body.offset === undefined ? {} : { offset: body.offset as number }),
+        },
+      );
+      response.writeHead(200, {
+        "content-type": "application/octet-stream",
+        "content-length": String(data.length),
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+      });
+      response.end(data);
     },
   },
   {

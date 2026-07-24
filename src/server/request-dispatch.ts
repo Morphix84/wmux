@@ -21,6 +21,7 @@ import {
 } from "./paste-image-staging.js";
 import { RepositoryReviewError } from "./repository-review.js";
 import { AgentFollowUpError } from "./agent-follow-up.js";
+import { KittyGraphicsSourceError } from "./kitty-graphics-source.js";
 import {
   apiRoutes,
   classifyHttpRoute,
@@ -294,6 +295,7 @@ export const createRequestHandler = (
       || error instanceof HostRegistryError
       || error instanceof StaticMachineStoreError
       || error instanceof PasteImageStageError
+      || error instanceof KittyGraphicsSourceError
       || error instanceof RepositoryReviewError
       || error instanceof AgentFollowUpError
     ) {

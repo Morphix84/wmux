@@ -103,6 +103,13 @@ export interface StagedPanePasteImage {
   expiresAt: string;
 }
 
+export interface KittyGraphicsSourceRequest {
+  medium: "f" | "t" | "s";
+  source: string;
+  size?: number;
+  offset?: number;
+}
+
 const responseError = async (response: Response): Promise<Error> => {
   try {
     const body = await response.json() as { error?: string };
@@ -383,6 +390,25 @@ export const api = {
     if (response.status === 401) throw new UnauthorizedError();
     if (!response.ok) throw await responseError(response);
     return response.json() as Promise<StagedPanePasteImage>;
+  },
+  readKittyGraphicsSource: async (
+    paneId: string,
+    request: KittyGraphicsSourceRequest,
+  ): Promise<Uint8Array> => {
+    const response = await fetch(
+      `/api/panes/${encodeURIComponent(paneId)}/kitty-graphics/source`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...authHeaders(),
+        },
+        body: JSON.stringify(request),
+      },
+    );
+    if (response.status === 401) throw new UnauthorizedError();
+    if (!response.ok) throw await responseError(response);
+    return new Uint8Array(await response.arrayBuffer());
   },
   discardPanePasteImage: async (paneId: string, stageId: string): Promise<void> => {
     const response = await fetch(
