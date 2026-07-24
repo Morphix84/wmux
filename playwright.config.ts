@@ -5,6 +5,16 @@ import { defineConfig, devices } from "@playwright/test";
 const port = 3489;
 const runtimeDir = path.resolve("test-results", `e2e-runtime-${process.pid}`);
 fs.mkdirSync(runtimeDir, { recursive: true });
+const runtimeConfigPath = path.join(runtimeDir, "wmux.config.json");
+const fixtureConfig = JSON.parse(
+  fs.readFileSync(path.resolve("e2e", "fixtures", "wmux.config.json"), "utf8"),
+) as {
+  machines: Array<Record<string, unknown>>;
+};
+for (const machine of fixtureConfig.machines) {
+  if (machine.id === "local") machine.cwd = process.cwd();
+}
+fs.writeFileSync(runtimeConfigPath, JSON.stringify(fixtureConfig, null, 2));
 
 export default defineConfig({
   testDir: "./e2e",
@@ -29,7 +39,7 @@ export default defineConfig({
       ...process.env,
       WMUX_DISABLE_AUTH: "1",
       WMUX_REGISTRATION_TOKEN: "e2e-registration-token",
-      WMUX_CONFIG_PATH: path.resolve("e2e", "fixtures", "wmux.config.json"),
+      WMUX_CONFIG_PATH: runtimeConfigPath,
       WMUX_STATE_PATH: path.join(runtimeDir, "state.json"),
       WMUX_SETTINGS_PATH: path.join(runtimeDir, "settings.json"),
       WMUX_AGENT_TIMELINE_PATH: path.join(runtimeDir, "agent-timelines.json"),
@@ -37,6 +47,7 @@ export default defineConfig({
       WMUX_PUBLIC_URL: `http://127.0.0.1:${port}`,
       WMUX_CERT_FILE: "",
       WMUX_KEY_FILE: "",
+      PATH: `${path.resolve("e2e", "fixtures", "bin")}${path.delimiter}${process.env.PATH ?? ""}`,
     },
   },
   projects: [

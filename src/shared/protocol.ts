@@ -369,6 +369,25 @@ export interface DelegationRecord {
   updatedAt: string;
 }
 
+export type AgentFollowUpAction = "continue" | "review";
+
+export interface AgentFollowUpRequest {
+  action: AgentFollowUpAction;
+  prompt?: string;
+  model?: string;
+  writeAccess?: boolean;
+  unattended?: boolean;
+}
+
+export interface AgentFollowUpResult {
+  action: AgentFollowUpAction;
+  runId: string;
+  sessionId: string;
+  delegation: DelegationRecord;
+  timeline: AgentSessionTimeline;
+  snapshot?: AgentTimelineSnapshotLink;
+}
+
 export interface TerminalRun {
   id: string;
   workspaceId: string;

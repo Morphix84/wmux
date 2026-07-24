@@ -19,6 +19,7 @@ import {
   PasteImageStageError,
 } from "./paste-image-staging.js";
 import { RepositoryReviewError } from "./repository-review.js";
+import { AgentFollowUpError } from "./agent-follow-up.js";
 import {
   apiRoutes,
   classifyHttpRoute,
@@ -257,6 +258,7 @@ export const createRequestHandler = (
       || error instanceof HostRegistryError
       || error instanceof PasteImageStageError
       || error instanceof RepositoryReviewError
+      || error instanceof AgentFollowUpError
     ) {
       sendJson(response, error.status, { error: error.code });
       return;

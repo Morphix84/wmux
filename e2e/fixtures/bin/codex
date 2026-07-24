@@ -1,0 +1,20 @@
+#!/bin/sh
+set -eu
+
+prompt=$(sed -n '1,$p')
+request=$(printf '%s\n' "$prompt" | tail -n 1)
+case "$request" in
+  "Create the reviewed revision marker.")
+    mkdir -p test-results
+    printf '%s\n' "reviewed revision" > test-results/agent-follow-up-revision.txt
+    response="Revision marker created."
+    ;;
+  *"Do not modify files.")
+    response="Review complete. The working-tree snapshot is ready for revision."
+    ;;
+  *)
+    response="Headless fixture completed."
+    ;;
+esac
+
+printf '%s\n' "{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"$response\"}}"

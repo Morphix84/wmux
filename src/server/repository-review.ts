@@ -126,6 +126,11 @@ export interface GitCommandOptions {
   signal?: AbortSignal;
 }
 
+export interface WorkingTreeSnapshotTarget {
+  repositoryRoot: string;
+  snapshot: WorkingTreeSnapshot;
+}
+
 export type GitCommandRunner = (
   args: readonly string[],
   options: GitCommandOptions,
@@ -819,15 +824,49 @@ export class RepositoryReviewService {
     this.environment = repositoryGitEnvironment(options.environment);
   }
 
-  async workingTreeSnapshot(paneId: string, signal?: AbortSignal): Promise<WorkingTreeSnapshot> {
-    const context = this.state.findPaneContext(paneId);
-    if (!context) throw new RepositoryReviewError(404, "pane_not_found");
-    const machines = typeof this.machineSource === "function" ? this.machineSource() : this.machineSource;
-    const machine = machines.find((candidate) => candidate.id === context.pane.machineId);
-    if (!machine || machine.kind !== "local") {
-      throw new RepositoryReviewError(422, "repository_review_non_local");
+  async localRepositoryRoot(
+    paneId: string,
+    signal?: AbortSignal,
+  ): Promise<string> {
+    const cwd = this.localPaneCwd(paneId);
+    const result = await this.runner(REPOSITORY_GIT_COMMANDS.discover, {
+      cwd,
+      env: this.environment,
+      timeoutMs: this.limits.timeoutMs,
+      maxOutputBytes: 16 * 1024,
+      signal,
+    });
+    if (result.cancelled) {
+      throw new RepositoryReviewError(408, "repository_cancelled");
     }
-    const cwd = validateCwd(context.pane.cwd ?? machine.cwd ?? os.homedir());
+    if (result.timedOut) {
+      throw new RepositoryReviewError(504, "repository_timeout");
+    }
+    if (result.outputLimited || result.status !== 0) {
+      throw new RepositoryReviewError(422, "repository_not_found");
+    }
+    const repositoryRoot = validateCwd(
+      result.stdout.toString("utf8").replace(/\r?\n$/u, ""),
+    );
+    try {
+      return fs.realpathSync(repositoryRoot);
+    } catch {
+      throw new RepositoryReviewError(422, "repository_not_found");
+    }
+  }
+
+  async workingTreeSnapshot(
+    paneId: string,
+    signal?: AbortSignal,
+  ): Promise<WorkingTreeSnapshot> {
+    return (await this.workingTreeSnapshotTarget(paneId, signal)).snapshot;
+  }
+
+  async workingTreeSnapshotTarget(
+    paneId: string,
+    signal?: AbortSignal,
+  ): Promise<WorkingTreeSnapshotTarget> {
+    const cwd = this.localPaneCwd(paneId);
     const deadline = Date.now() + this.limits.timeoutMs;
     let gitOutputBytes = 0;
     const ensureActive = (): void => {
@@ -1008,18 +1047,36 @@ export class RepositoryReviewService {
         !file.untrackedPatch?.truncated
         && file.contentOmitted === undefined);
     return {
-      kind: "working-tree",
-      contentRevision: `sha256:${revision.digest("hex")}`,
-      headRevision,
-      consistency,
-      ignoredFilesExcluded: true,
-      complete,
-      filesTruncated,
-      observedFileCount: parsedFiles.length,
-      files: boundedFiles.map(publicFile),
-      stagedPatch,
-      workingTreePatch,
-      limits: { ...this.limits },
+      repositoryRoot: canonicalRoot,
+      snapshot: {
+        kind: "working-tree",
+        contentRevision: `sha256:${revision.digest("hex")}`,
+        headRevision,
+        consistency,
+        ignoredFilesExcluded: true,
+        complete,
+        filesTruncated,
+        observedFileCount: parsedFiles.length,
+        files: boundedFiles.map(publicFile),
+        stagedPatch,
+        workingTreePatch,
+        limits: { ...this.limits },
+      },
     };
+  }
+
+  private localPaneCwd(paneId: string): string {
+    const context = this.state.findPaneContext(paneId);
+    if (!context) throw new RepositoryReviewError(404, "pane_not_found");
+    const machines = typeof this.machineSource === "function"
+      ? this.machineSource()
+      : this.machineSource;
+    const machine = machines.find(
+      (candidate) => candidate.id === context.pane.machineId,
+    );
+    if (!machine || machine.kind !== "local") {
+      throw new RepositoryReviewError(422, "repository_review_non_local");
+    }
+    return validateCwd(context.pane.cwd ?? machine.cwd ?? os.homedir());
   }
 }

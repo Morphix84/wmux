@@ -3,6 +3,7 @@ import https from "node:https";
 import path from "node:path";
 import type { ViteDevServer } from "vite";
 import type { DelegationConfig } from "../shared/protocol.js";
+import { AgentFollowUpService } from "./agent-follow-up.js";
 import { AgentSessionService } from "./agent-sessions.js";
 import type { AuthConfig } from "./auth.js";
 import {
@@ -69,6 +70,7 @@ export const createHttpServer = (
     keybindings?: KeybindingMap;
     repositoryReviews?: RepositoryReviewService;
     agentSessions?: AgentSessionService;
+    agentFollowUps?: AgentFollowUpService;
     delegation?: DelegationConfig;
   },
 ): Promise<WmuxHttpServer> => {
@@ -83,6 +85,8 @@ export const createHttpServer = (
   const agentSessions = options.agentSessions
     ?? sessions.agentSessions
     ?? new AgentSessionService(state);
+  const agentFollowUps = options.agentFollowUps
+    ?? new AgentFollowUpService(state, agentSessions, repositoryReviews);
   const root = clientRoot();
   const streamRequests = new StreamRequestStore();
   let vite: ViteDevServer | undefined;
@@ -121,6 +125,7 @@ export const createHttpServer = (
   const serverDeps: ServerDeps = {
     bindHost,
     auth,
+    agentFollowUps,
     agentSessions,
     trustedProxies,
     loginAttempts,
@@ -200,7 +205,11 @@ export const createHttpServer = (
 
   server.on("close", () => {
     hostRegistry?.off("change", onRegistryChange);
+    agentFollowUps.dispose();
     events.dispose();
+  });
+  server.on("wmux-shutdown", () => {
+    agentFollowUps.dispose();
   });
 
   return setupDevServer().then(() => server);

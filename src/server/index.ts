@@ -171,6 +171,7 @@ const main = async (): Promise<void> => {
     state.flush();
     hostRegistry.dispose();
     sessionManager.disposeAll();
+    server.emit("wmux-shutdown");
     server.close(() => process.exit(0));
     // Backstop if connections keep the server open past the grace period.
     setTimeout(() => process.exit(0), 3000).unref();

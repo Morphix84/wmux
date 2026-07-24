@@ -2288,6 +2288,53 @@ button.active-tool {
   overflow-wrap: anywhere;
 }
 
+.mobile-agent-follow-up {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 7px 10px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  padding: 8px;
+  font: 11px/1.3 var(--wmux-mono-font);
+}
+
+.mobile-agent-follow-up > div {
+  display: grid;
+  min-width: 0;
+}
+
+.mobile-agent-follow-up strong {
+  color: var(--gold);
+  text-transform: uppercase;
+}
+
+.mobile-agent-follow-up span {
+  color: var(--muted);
+}
+
+.mobile-agent-follow-up button {
+  grid-row: span 2;
+  border: 1px solid var(--blue);
+  border-radius: 0;
+  background: var(--panel-2);
+  padding: 0 10px;
+  color: var(--blue);
+  font: 700 10px/1 var(--wmux-mono-font);
+  text-transform: uppercase;
+}
+
+.mobile-agent-follow-up label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text);
+  text-transform: uppercase;
+}
+
+.mobile-agent-follow-up input {
+  accent-color: var(--blue);
+}
+
 .mobile-agent-launch-panel {
   display: grid;
   gap: 10px;

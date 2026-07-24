@@ -2055,6 +2055,10 @@ export function AppShell() {
             pane={activePane}
             onSendInput={sendPaneInput}
             onUploadAttachment={async (paneId, attachment) => (await api.uploadPaneAttachment(paneId, attachment)).attachment}
+            onFollowUp={async (sessionId, request) => {
+              const result = await api.createAgentFollowUp(sessionId, request);
+              await refresh(result.state);
+            }}
             onFocusTerminal={() => {
               if (activeWorkspace && activeTab) requestTerminalFocus(activeWorkspace.id, activeTab.id);
               setMobileSurfaceMode("terminal");

@@ -30,6 +30,7 @@ const routeCases: Array<[string, string, string]> = [
   ["health", "GET", "/api/health"], ["auth-info", "GET", "/api/auth-info"], ["login", "POST", "/api/login"],
   ["auth-session", "GET", "/api/auth/session"], ["bootstrap", "GET", "/api/bootstrap"],
   ["agent-session-timeline", "GET", "/api/agent-sessions/session"],
+  ["agent-session-follow-up", "POST", "/api/agent-sessions/session/turns"],
   ["delegation-status", "GET", "/api/delegations/run"],
   ["registry-list", "GET", "/api/registry/hosts"], ["registry-register", "POST", "/api/registry/hosts"],
   ["registry-delete", "DELETE", "/api/registry/hosts/host"], ["session-audit", "GET", "/api/session-audit"],
@@ -75,6 +76,9 @@ test("browser, automation, helper, registration, and legacy policies are separat
   assert.equal(authorizeHttpPrincipal(auth, principal("browser-session"), policy("GET", "/api/helpers/windows/win/bootstrap")), false);
   assert.equal(authorizeHttpPrincipal(auth, principal("automation"), policy("GET", "/api/bootstrap")), true);
   assert.equal(authorizeHttpPrincipal(auth, principal("automation"), policy("GET", "/api/delegations/run")), true);
+  assert.equal(authorizeHttpPrincipal(auth, principal("browser-session"), policy("POST", "/api/agent-sessions/session/turns")), true);
+  assert.equal(authorizeHttpPrincipal(auth, principal("automation"), policy("POST", "/api/agent-sessions/session/turns")), false);
+  assert.equal(authorizeHttpPrincipal(auth, principal("helper"), policy("POST", "/api/agent-sessions/session/turns")), false);
   assert.equal(authorizeHttpPrincipal(auth, principal("helper"), policy("GET", "/api/delegations/run")), false);
   assert.equal(authorizeHttpPrincipal(auth, principal("automation"), policy("POST", "/api/notifications")), false);
   assert.equal(authorizeHttpPrincipal(auth, principal("helper"), policy("POST", "/api/notifications")), true);
