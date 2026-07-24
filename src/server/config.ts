@@ -140,6 +140,8 @@ export const configSchema = z.object({
   machines: z.array(machineSchema).optional(),
   // Container deployments may not want to expose a shell inside the wmux container.
   localMachine: z.boolean().optional(),
+  // Written by the browser machine editor so its catalog survives checkout-local config precedence.
+  managedMachineCatalog: z.literal(true).optional(),
   keybindings: keybindingOverridesSchema.optional(),
   terminalFontFamily: z.string().trim().min(1).max(256)
     // eslint-disable-next-line no-control-regex
@@ -190,7 +192,23 @@ const candidates = (): string[] => process.env.WMUX_CONFIG_PATH
 export const loadConfig = (): AppConfig => {
   for (const candidate of candidates()) {
     if (!fs.existsSync(candidate)) continue;
-    const raw = JSON.parse(fs.readFileSync(candidate, "utf8"));
+    let raw = JSON.parse(fs.readFileSync(candidate, "utf8")) as Record<string, unknown>;
+    if (!process.env.WMUX_CONFIG_PATH) {
+      const managedPath = path.join(os.homedir(), ".wmux", "config.json");
+      if (candidate !== managedPath && fs.existsSync(managedPath)) {
+        const managedRaw = JSON.parse(
+          fs.readFileSync(managedPath, "utf8"),
+        ) as Record<string, unknown>;
+        if (managedRaw.managedMachineCatalog === true) {
+          const managed = configSchema.parse(managedRaw);
+          raw = {
+            ...raw,
+            machines: managed.machines,
+            localMachine: managed.localMachine,
+          };
+        }
+      }
+    }
     const parsed = configSchema.parse(raw);
     const machines = parsed.machines ?? [];
     const keybindings = resolveKeybindings(parsed.keybindings as KeybindingOverrides | undefined);

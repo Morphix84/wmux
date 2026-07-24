@@ -6,10 +6,58 @@ import type {
   BootstrapPayload,
   DoctorReport,
   DurableSessionAudit,
+  MachineKind,
+  MachinePlatform,
+  MachineStreamConfig,
+  SessionBackend,
   SplitDirection,
   WorkspaceReorderPosition,
   WmuxSettings,
 } from "./types";
+
+export interface ManagedStaticMachine {
+  id: string;
+  name: string;
+  kind: MachineKind;
+  platform?: MachinePlatform;
+  host?: string;
+  user?: string;
+  port?: number;
+  shell?: string;
+  cwd?: string;
+  command?: string[];
+  sessionBackend?: SessionBackend;
+  loadPowerShellProfile?: boolean;
+  agentUrl?: string;
+  agentPort?: number;
+  stream?: MachineStreamConfig;
+  hasAgentToken: boolean;
+  hasGatewayToken: boolean;
+}
+
+export interface ManagedRegisteredHost {
+  id: string;
+  machine: {
+    id: string;
+    name: string;
+    kind: "ssh" | "powershell-ssh";
+    user?: string;
+    port?: number;
+    sessionBackend?: SessionBackend;
+    agentPort?: number;
+  };
+  active: boolean;
+  disabled?: boolean;
+  shadowed: boolean;
+  observedAddress: string;
+  lastSeenAt: string;
+  expiresAt: string;
+}
+
+export interface MachineManagementCatalog {
+  staticMachines: ManagedStaticMachine[];
+  registeredHosts: ManagedRegisteredHost[];
+}
 
 export type ModalSettingsUpdate = Omit<WmuxSettings, "collapsedWorkspaceIds">;
 
@@ -126,6 +174,43 @@ export const api = {
     ),
   auditSessions: () => json<DurableSessionAudit>("/api/session-audit"),
   doctor: () => json<DoctorReport>("/api/doctor"),
+  managedMachines: () => json<MachineManagementCatalog>("/api/machines/manage"),
+  createManagedMachine: (machine: Omit<ManagedStaticMachine, "hasAgentToken" | "hasGatewayToken">) =>
+    json<{ machine: ManagedStaticMachine; state: BootstrapPayload }>("/api/machines", {
+      method: "POST",
+      body: JSON.stringify(machine),
+    }),
+  updateManagedMachine: (
+    machine: Omit<ManagedStaticMachine, "hasAgentToken" | "hasGatewayToken">,
+  ) =>
+    json<{ machine: ManagedStaticMachine; state: BootstrapPayload }>(
+      `/api/machines/${encodeURIComponent(machine.id)}`,
+      {
+        method: "PUT",
+        body: JSON.stringify(machine),
+      },
+    ),
+  deleteManagedMachine: (machineId: string) =>
+    json<{ removed: true; state: BootstrapPayload }>(
+      `/api/machines/${encodeURIComponent(machineId)}`,
+      { method: "DELETE" },
+    ),
+  updateRegisteredHost: (
+    machineId: string,
+    update: { name?: string; disabled?: boolean },
+  ) =>
+    json<{ host: ManagedRegisteredHost; state: BootstrapPayload }>(
+      `/api/registry/hosts/${encodeURIComponent(machineId)}`,
+      {
+        method: "PUT",
+        body: JSON.stringify(update),
+      },
+    ),
+  deleteRegisteredHost: (machineId: string) =>
+    json<{ removed: boolean }>(
+      `/api/registry/hosts/${encodeURIComponent(machineId)}`,
+      { method: "DELETE" },
+    ),
   cleanupSession: (backend: "tmux" | "screen", name: string) =>
     json<DurableSessionAudit>(`/api/session-audit/${backend}/${encodeURIComponent(name)}`, { method: "DELETE" }),
   updateSettings: (settings: ModalSettingsUpdate) =>

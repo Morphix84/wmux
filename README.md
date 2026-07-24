@@ -194,6 +194,22 @@ cp wmux.config.example.json wmux.config.json
 }
 ```
 
+- Open **Settings -> Manage machines** or run **Manage machines** from the
+  command palette to add, edit, and remove static machines without server shell
+  access.
+- The editor writes `~/.wmux/config.json` with owner-only permissions and a
+  validated rolling backup.
+  `WMUX_MANAGED_CONFIG_PATH` overrides that write destination for isolated
+  tests.
+  After the first editor save, its marked machine catalog overrides only the
+  machine list in a checkout-local config; the existing precedence for
+  keybindings, terminal defaults, and delegation settings is unchanged.
+- Machine IDs are permanent identities after creation.
+  Change the machine name when a user-facing label needs to change.
+- The same editor can rename, disable, enable, and delete dynamic
+  registrations.
+  It never creates, accepts, or displays registration, agent, or stream tokens;
+  provision those credentials through the documented setup flow.
 - `WMUX_CONFIG_PATH` selects one explicit file and disables fallback.
 - `terminalFontFamily` accepts a browser CSS font-family stack and `terminalFontSize` accepts an integer from 10 through 24.
   These values are startup-loaded defaults; restart wmux after changing them.
@@ -887,7 +903,6 @@ known implementation gaps. Report vulnerabilities privately according to the
 ## Current Limitations
 
 - wmux is single-user and private-network only.
-- Machine management remains file-based; dynamic registrations have no UI.
 - Native session agents do not preserve processes across their own unexpected
   or forced restart. Windows automatic staged updates wait for active panes to
   close.

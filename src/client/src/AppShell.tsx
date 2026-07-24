@@ -6,6 +6,7 @@ import { ActivityPanel, buildActivityItems } from "./ActivityPanel";
 import { AgentFleet, type AgentFleetRow } from "./AgentFleet";
 import { CommandPalette, type PaletteCommand } from "./CommandPalette";
 import { SettingsModal, cleanAlias, defaultSettings, type SettingsSurface } from "./SettingsModal";
+import { MachineManagerModal } from "./MachineManagerModal";
 import { ColorSchemeProvider } from "./color-scheme-context";
 import { colorSchemeById, colorSchemeCssVariables } from "./color-schemes";
 
@@ -131,6 +132,7 @@ export function AppShell() {
     onSidebarResizerKeyDown,
   } = useSidebar(mobileViewport.isMobile);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [machineManagerOpen, setMachineManagerOpen] = useState(false);
   const [settingsSurface, setSettingsSurface] = useState<SettingsSurface>("dom");
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [commandPaletteQuery, setCommandPaletteQuery] = useState("");
@@ -627,6 +629,12 @@ export function AppShell() {
     setSettingsOpen(false);
   };
 
+  const openMachineManager = useCallback(() => {
+    setPreviewSettings(null);
+    setSettingsOpen(false);
+    setMachineManagerOpen(true);
+  }, []);
+
   const switchChromeMode = (enabled: boolean) => {
     const params = new URLSearchParams(window.location.search);
     params.delete("opentui");
@@ -1007,7 +1015,7 @@ export function AppShell() {
   useKeyboardShortcuts({
     keybindings,
     apple: appleKeybindings,
-    modalOpen: settingsOpen || commandPaletteOpen || diagnosticsOpen || agentFleetOpen,
+    modalOpen: settingsOpen || machineManagerOpen || commandPaletteOpen || diagnosticsOpen || agentFleetOpen,
     openCommandPalette,
     openSettings,
     toggleSidebar,
@@ -1091,6 +1099,14 @@ export function AppShell() {
         section: "System",
         run: openSettings,
         keywords: ["tmux", "screen", "durable", "orphan", "duplicate"],
+      },
+      {
+        id: "manage-machines",
+        title: "Manage machines",
+        subtitle: "Add static hosts or manage dynamic registrations",
+        section: "System",
+        run: openMachineManager,
+        keywords: ["hosts", "registry", "ssh", "machines"],
       },
       {
         id: "open-diagnostics",
@@ -1360,6 +1376,7 @@ export function AppShell() {
     targetMachineId,
     openTuiMode,
     openSettings,
+    openMachineManager,
     openDiagnostics,
     activeStream,
     activeStreamMachine,
@@ -2167,8 +2184,15 @@ export function AppShell() {
           onPreview={setPreviewSettings}
           onSave={updateSettings}
           onCancel={cancelSettings}
+          onManageMachines={openMachineManager}
           onUseDomFallback={openTuiMode && !mobileViewport.isMobile ? () => setSettingsSurface("dom") : undefined}
           onUseOpenTui={openTuiMode && !mobileViewport.isMobile ? () => setSettingsSurface("opentui") : undefined}
+        />
+      ) : null}
+      {machineManagerOpen ? (
+        <MachineManagerModal
+          onClose={() => setMachineManagerOpen(false)}
+          onState={refresh}
         />
       ) : null}
       {commandPaletteOpen ? (

@@ -3,6 +3,7 @@ import { authRoutes } from "./auth-routes.js";
 import { bootstrapRoutes } from "./bootstrap-routes.js";
 import { eventIngestRoutes } from "./event-ingest-routes.js";
 import { mediaRoutes } from "./media-routes.js";
+import { machineRoutes } from "./machine-routes.js";
 import { registryRoutes } from "./registry-routes.js";
 import { repositoryRoutes } from "./repository-routes.js";
 import { streamRoutes } from "./stream-routes.js";
@@ -15,6 +16,7 @@ export const apiRoutes = [
   ...bootstrapRoutes,
   ...eventIngestRoutes,
   ...mediaRoutes,
+  ...machineRoutes,
   ...registryRoutes,
   ...repositoryRoutes,
   ...streamRoutes,

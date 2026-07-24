@@ -14,6 +14,7 @@ import {
 } from "./auth-policy.js";
 import { isAllowedOrigin, isAllowedRequestHost } from "./bind.js";
 import { HostRegistryError, type HostRegistry } from "./host-registry.js";
+import { StaticMachineStoreError } from "./static-machine-store.js";
 import {
   MAX_PASTE_IMAGE_BYTES,
   PasteImageStageError,
@@ -278,6 +279,7 @@ export const createRequestHandler = (
     if (
       error instanceof HttpError
       || error instanceof HostRegistryError
+      || error instanceof StaticMachineStoreError
       || error instanceof PasteImageStageError
       || error instanceof RepositoryReviewError
       || error instanceof AgentFollowUpError

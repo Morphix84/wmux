@@ -12,6 +12,7 @@ import { createHttpServer } from "../src/server/http.js";
 import type { SessionManager } from "../src/server/session-manager.js";
 import { SettingsStore } from "../src/server/settings.js";
 import { StateStore } from "../src/server/state.js";
+import { StaticMachineStore } from "../src/server/static-machine-store.js";
 import { resolveStreamStatuses } from "../src/server/streams.js";
 import type {
   BootstrapPayload,
@@ -40,6 +41,7 @@ interface TestServer {
   baseUrl: string;
   registry: HostRegistry;
   state: StateStore;
+  configPath: string;
   close: () => Promise<void>;
 }
 
@@ -50,14 +52,19 @@ const startServer = async (
 ): Promise<TestServer> => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wmux-registry-http-"));
   const staticMachines: MachineConfig[] = [{ id: "local", name: "Local", kind: "local" }];
+  const configPath = path.join(dir, "config.json");
+  const staticMachineStore = new StaticMachineStore(staticMachines, configPath);
   const registry = new HostRegistry(staticMachines, path.join(dir, "registry.json"), undefined, undefined, 0);
   const currentMachines = (): MachineConfig[] => registry.machines();
   const state = new StateStore(currentMachines(), path.join(dir, "state.json"));
   const settings = new SettingsStore(path.join(dir, "settings.json"));
-  const sessions = {} as SessionManager;
+  const sessions = {
+    hasLiveSessionsForMachine: () => false,
+  } as SessionManager;
   const server = await createHttpServer("127.0.0.1", state, currentMachines, sessions, settings, {
     auth,
     hostRegistry: registry,
+    staticMachines: staticMachineStore,
     registrationToken: "registration-token",
     trustedProxies: new Set(["127.0.0.1"]),
     healthRefreshIntervals,
@@ -68,6 +75,7 @@ const startServer = async (
     baseUrl: `http://127.0.0.1:${port}`,
     registry,
     state,
+    configPath,
     close: async () => {
       const closed = once(server, "close");
       server.close();
@@ -165,6 +173,111 @@ test("registration remains token-gated when main wmux auth is disabled", async (
 
     const removed = await fetch(`${app.baseUrl}/api/registry/hosts/roamer`, { method: "DELETE" });
     assert.equal(removed.status, 200);
+  } finally {
+    await app.close();
+  }
+});
+
+test("browser machine management creates, edits, disables, and deletes catalog entries", async () => {
+  const app = await startServer();
+  try {
+    const initial = await fetch(`${app.baseUrl}/api/machines/manage`, {
+      headers: bearer("wmux-token"),
+    });
+    assert.equal(initial.status, 200);
+    const initialCatalog = await initial.json() as {
+      staticMachines: Array<{ id: string }>;
+      registeredHosts: unknown[];
+    };
+    assert.deepEqual(initialCatalog.staticMachines.map((machine) => machine.id), ["local"]);
+    assert.deepEqual(initialCatalog.registeredHosts, []);
+
+    const secretRejected = await fetch(`${app.baseUrl}/api/machines`, {
+      method: "POST",
+      headers: bearer("wmux-token"),
+      body: JSON.stringify({
+        id: "secret",
+        name: "Secret",
+        kind: "ssh",
+        agentToken: "browser-must-not-write-this",
+      }),
+    });
+    assert.equal(secretRejected.status, 400);
+
+    const created = await fetch(`${app.baseUrl}/api/machines`, {
+      method: "POST",
+      headers: bearer("wmux-token"),
+      body: JSON.stringify({
+        id: "managed",
+        name: "Managed",
+        kind: "ssh",
+        platform: "linux",
+        host: "127.0.0.1",
+        user: "operator",
+        port: 1,
+        sessionBackend: "auto",
+      }),
+    });
+    assert.equal(created.status, 201);
+    assert.ok(app.registry.machines().some((machine) => machine.id === "managed"));
+
+    const updated = await fetch(`${app.baseUrl}/api/machines/managed`, {
+      method: "PUT",
+      headers: bearer("wmux-token"),
+      body: JSON.stringify({
+        id: "managed",
+        name: "Managed Renamed",
+        kind: "ssh",
+        platform: "linux",
+        host: "127.0.0.1",
+        user: "operator",
+        port: 1,
+        sessionBackend: "auto",
+      }),
+    });
+    assert.equal(updated.status, 200);
+    assert.equal(
+      app.registry.machines().find((machine) => machine.id === "managed")?.name,
+      "Managed Renamed",
+    );
+
+    const registered = await fetch(`${app.baseUrl}/api/registry/hosts`, {
+      method: "POST",
+      headers: { ...bearer("registration-token"), "x-forwarded-for": "127.0.0.2" },
+      body: registrationBody(),
+    });
+    assert.equal(registered.status, 200);
+    const disabled = await fetch(`${app.baseUrl}/api/registry/hosts/roamer`, {
+      method: "PUT",
+      headers: bearer("wmux-token"),
+      body: JSON.stringify({ name: "Roamer Renamed", disabled: true }),
+    });
+    assert.equal(disabled.status, 200);
+    assert.equal(
+      app.registry.machines().find((machine) => machine.id === "roamer")?.online,
+      false,
+    );
+    assert.equal(app.registry.snapshot()[0].machine.name, "Roamer Renamed");
+    assert.equal(app.registry.snapshot()[0].disabled, true);
+
+    const removedRegistration = await fetch(`${app.baseUrl}/api/registry/hosts/roamer`, {
+      method: "DELETE",
+      headers: bearer("wmux-token"),
+    });
+    assert.equal(removedRegistration.status, 200);
+    const removedStatic = await fetch(`${app.baseUrl}/api/machines/managed`, {
+      method: "DELETE",
+      headers: bearer("wmux-token"),
+    });
+    assert.equal(removedStatic.status, 200);
+    assert.equal(app.registry.machines().some((machine) => machine.id === "managed"), false);
+
+    const persistedText = fs.readFileSync(app.configPath, "utf8");
+    const persisted = JSON.parse(persistedText) as {
+      machines: Array<{ id: string }>;
+    };
+    assert.equal(persisted.machines.some((machine) => machine.id === "managed"), false);
+    assert.doesNotMatch(persistedText, /browser-must-not-write-this/);
   } finally {
     await app.close();
   }

@@ -167,6 +167,51 @@ test("WMUX_CONFIG_PATH isolates explicit runtime and test configuration", () => 
   }
 });
 
+test("the managed home catalog overrides only checkout-local machines", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "wmux-managed-config-"));
+  const checkout = path.join(directory, "checkout");
+  const home = path.join(directory, "home");
+  const previousDirectory = process.cwd();
+  const previousHome = process.env.HOME;
+  const previousConfigPath = process.env.WMUX_CONFIG_PATH;
+  fs.mkdirSync(checkout);
+  fs.mkdirSync(path.join(home, ".wmux"), { recursive: true });
+
+  try {
+    delete process.env.WMUX_CONFIG_PATH;
+    process.env.HOME = home;
+    process.chdir(checkout);
+    fs.writeFileSync(
+      path.join(checkout, "wmux.config.json"),
+      JSON.stringify({
+        machines: [{ id: "checkout", name: "Checkout", kind: "local" }],
+        localMachine: false,
+        terminalFontSize: 17,
+      }),
+    );
+    fs.writeFileSync(
+      path.join(home, ".wmux", "config.json"),
+      JSON.stringify({
+        managedMachineCatalog: true,
+        machines: [{ id: "managed", name: "Managed", kind: "local" }],
+        localMachine: false,
+        terminalFontSize: 22,
+      }),
+    );
+
+    const config = loadConfig();
+    assert.deepEqual(config.machines.map((configuredMachine) => configuredMachine.id), ["managed"]);
+    assert.equal(config.terminalFontSize, 17);
+  } finally {
+    process.chdir(previousDirectory);
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    if (previousConfigPath === undefined) delete process.env.WMUX_CONFIG_PATH;
+    else process.env.WMUX_CONFIG_PATH = previousConfigPath;
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("validates the localMachine flag", () => {
   assert.ok(configSchema.safeParse({ machines: [], localMachine: false }).success);
   assert.ok(configSchema.safeParse({ localMachine: true }).success);

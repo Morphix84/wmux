@@ -30,6 +30,7 @@ export function SettingsModal({
   onPreview,
   onSave,
   onCancel,
+  onManageMachines,
   onUseDomFallback,
   onUseOpenTui,
 }: {
@@ -42,6 +43,7 @@ export function SettingsModal({
   onPreview: (settings: WmuxSettings | null) => void;
   onSave: (settings: WmuxSettings) => void | Promise<void>;
   onCancel: () => void;
+  onManageMachines: () => void;
   onUseDomFallback?: () => void;
   onUseOpenTui?: () => void;
 }) {
@@ -141,6 +143,7 @@ export function SettingsModal({
         onApplyDraft={applyDraft}
         onSave={save}
         onCancel={onCancel}
+        onManageMachines={onManageMachines}
         onUseDomFallback={onUseDomFallback}
         onRunSessionAudit={runSessionAudit}
         onCleanupSession={cleanupSession}
@@ -299,6 +302,10 @@ export function SettingsModal({
                 />
               </label>
             ))}
+            <div className="settings-command-row">
+              <button type="button" onClick={onManageMachines}>Manage machines</button>
+              <span>Add static hosts or manage dynamic registrations</span>
+            </div>
           </section>
           <section className="settings-section">
             <h3>Inactive tabs</h3>

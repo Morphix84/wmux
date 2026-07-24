@@ -16,6 +16,7 @@ import { SettingsStore } from "./settings.js";
 import { terminalThemeEnvironment } from "./terminal-theme.js";
 import { SessionManager } from "./session-manager.js";
 import { StateStore } from "./state.js";
+import { StaticMachineStore } from "./static-machine-store.js";
 
 const arg = (name: string, fallback: string): string => {
   const index = process.argv.indexOf(name);
@@ -71,8 +72,9 @@ const main = async (): Promise<void> => {
   const trustedProxies = parseTrustedProxyAddresses();
   let stateStore: StateStore | undefined;
   let sessionManagerRef: SessionManager | undefined;
+  const staticMachines = new StaticMachineStore(config.machines);
   const hostRegistry = new HostRegistry(
-    config.machines,
+    staticMachines.snapshot(),
     undefined,
     undefined,
     (machineId) => !stateStore || stateStore.hasMachineReferences(machineId),
@@ -120,6 +122,7 @@ const main = async (): Promise<void> => {
     auth,
     tls,
     hostRegistry,
+    staticMachines,
     registrationToken: registrationAuth.token,
     trustedProxies,
     keybindings: config.keybindings,
