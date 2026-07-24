@@ -103,3 +103,29 @@ test("Windows-style reframing keeps the viewport and cursor anchored from the to
     checkpoint.dispose();
   }
 });
+
+test("Windows-style reframing clips discarded rows and columns when shrinking", () => {
+  const checkpoint = new TerminalCheckpoint(12, 5);
+  try {
+    checkpoint.write([
+      "\x1b[1;1HABCDEFGHIJKL",
+      "\x1b[2;1Hsecond-row",
+      "\x1b[3;1Hthird-row",
+      "\x1b[4;1HDISCARD-FOUR",
+      "\x1b[5;1HDISCARD-FIVE",
+      "\x1b[5;12H",
+    ].join(""));
+
+    checkpoint.reframe(7, 3);
+
+    assert.deepEqual(checkpoint.screenLines(), [
+      "ABCDEFG",
+      "second-",
+      "third-r",
+    ]);
+    assert.deepEqual(checkpoint.cursor(), { x: 6, y: 2, visible: true });
+    assert.doesNotMatch(checkpoint.screenLines().join("\n"), /DISCARD/);
+  } finally {
+    checkpoint.dispose();
+  }
+});

@@ -105,10 +105,12 @@ export class TerminalCheckpoint {
    */
   reframe(cols: number, rows: number): void {
     if (!this.terminal) return;
-    const snapshot = this.snapshot();
+    const targetCols = normalizeCols(cols);
+    const targetRows = normalizeRows(rows);
+    const snapshot = this.snapshotForDimensions(targetCols, targetRows);
     if (!snapshot || !this.terminal) return;
     try {
-      const next = loadGhostty()?.createTerminal(normalizeCols(cols), normalizeRows(rows), this.themeConfig);
+      const next = loadGhostty()?.createTerminal(targetCols, targetRows, this.themeConfig);
       if (!next) return;
       this.terminal.free();
       this.terminal = next;
@@ -122,10 +124,18 @@ export class TerminalCheckpoint {
   snapshot(): string {
     const terminal = this.terminal;
     if (!terminal) return "";
+    return this.snapshotForDimensions(terminal.cols, terminal.rows);
+  }
+
+  private snapshotForDimensions(targetCols: number, targetRows: number): string {
+    const terminal = this.terminal;
+    if (!terminal) return "";
     try {
       terminal.update();
       const cursor = terminal.getCursor();
       const cells = terminal.getViewport();
+      const paintCols = Math.min(terminal.cols, targetCols);
+      const paintRows = Math.min(terminal.rows, targetRows);
       const output: string[] = ["\x1bc"];
       if (terminal.isAlternateScreen()) output.push("\x1b[?1049h");
 
@@ -133,11 +143,12 @@ export class TerminalCheckpoint {
       // column cannot introduce an extra scroll or line wrap.
       output.push("\x1b[?7l", "\x1b[2J", "\x1b[H");
       let activeStyle = "";
-      for (let row = 0; row < terminal.rows; row += 1) {
+      for (let row = 0; row < paintRows; row += 1) {
         output.push(`\x1b[${row + 1};1H`);
-        for (let col = 0; col < terminal.cols; col += 1) {
+        for (let col = 0; col < paintCols; col += 1) {
           const cell = cells[row * terminal.cols + col];
           if (!cell || cell.width === 0) continue;
+          if (col + cell.width > paintCols) continue;
           const style = cellStyleKey(cell);
           if (style !== activeStyle) {
             output.push(cellStyleSequence(cell));
@@ -150,7 +161,9 @@ export class TerminalCheckpoint {
       output.push("\x1b[0m");
       this.restorePrivateModes(output, terminal);
       output.push(cursorStyleSequence(cursor.style, cursor.blinking));
-      output.push(`\x1b[${cursor.y + 1};${cursor.x + 1}H`);
+      output.push(
+        `\x1b[${Math.min(cursor.y, targetRows - 1) + 1};${Math.min(cursor.x, targetCols - 1) + 1}H`,
+      );
       output.push(cursor.visible ? "\x1b[?25h" : "\x1b[?25l");
       return output.join("");
     } catch (error) {
