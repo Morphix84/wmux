@@ -42,4 +42,6 @@ test("the Playwright runtime protects server-only endpoint credentials", () => {
   const source = fs.readFileSync(path.join(repoRoot, "playwright.config.ts"), "utf8");
 
   assert.match(source, /fs\.chmodSync\(runtimeDir, 0o700\)/);
+  assert.match(source, /fs\.chmodSync\(runtimeHome, 0o700\)/);
+  assert.match(source, /HOME: runtimeHome/);
 });

@@ -6,6 +6,9 @@ const port = 3489;
 const runtimeDir = path.resolve("test-results", `e2e-runtime-${process.pid}`);
 fs.mkdirSync(runtimeDir, { recursive: true, mode: 0o700 });
 fs.chmodSync(runtimeDir, 0o700);
+const runtimeHome = path.join(runtimeDir, "home");
+fs.mkdirSync(runtimeHome, { recursive: true, mode: 0o700 });
+fs.chmodSync(runtimeHome, 0o700);
 const runtimeConfigPath = path.join(runtimeDir, "wmux.config.json");
 const fixtureConfig = JSON.parse(
   fs.readFileSync(path.resolve("e2e", "fixtures", "wmux.config.json"), "utf8"),
@@ -21,6 +24,7 @@ export default defineConfig({
   testDir: "./e2e",
   testIgnore: "auth-login-only.spec.ts",
   outputDir: "test-results/playwright",
+  timeout: 90_000,
   fullyParallel: false,
   workers: 1,
   retries: process.env.CI ? 1 : 0,
@@ -38,6 +42,7 @@ export default defineConfig({
     timeout: 120_000,
     env: {
       ...process.env,
+      HOME: runtimeHome,
       WMUX_DISABLE_AUTH: "1",
       WMUX_REGISTRATION_TOKEN: "e2e-registration-token",
       WMUX_CONFIG_PATH: runtimeConfigPath,

@@ -5449,6 +5449,7 @@ button.active-tool {
     border-radius: 0;
     padding: 7px 8px 7px 6px;
     clip-path: none;
+    touch-action: manipulation;
   }
 
   .workspace-tree-row {
