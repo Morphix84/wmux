@@ -34,6 +34,10 @@ export function useSidebar(isMobile: boolean) {
     setSidebarCollapsed(true);
   }, []);
 
+  const expandSidebar = useCallback(() => {
+    setSidebarCollapsed(false);
+  }, []);
+
   const startSidebarResize = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (isMobile || event.button !== 0) return;
     event.preventDefault();
@@ -92,7 +96,15 @@ export function useSidebar(isMobile: boolean) {
     setSidebarWidth(nextWidth);
   }, [isMobile, sidebarWidth, toggleSidebar]);
 
-  return { sidebarCollapsed, sidebarWidth, toggleSidebar, collapseSidebar, startSidebarResize, onSidebarResizerKeyDown };
+  return {
+    sidebarCollapsed,
+    sidebarWidth,
+    toggleSidebar,
+    collapseSidebar,
+    expandSidebar,
+    startSidebarResize,
+    onSidebarResizerKeyDown,
+  };
 }
 
 const clampSidebarWidth = (value: number): number =>

@@ -48,6 +48,8 @@ const MIN_DELIBERATE_EXIT_UPTIME_MS = 3000;
 // while an SSH runtime is still being staged. Retry briefly so pane state is
 // populated even when tmux consumed the shell's initial OSC 7 before attach.
 const DURABLE_CWD_REFRESH_RETRY_DELAYS_MS = [100, 500, 1500, 3000] as const;
+const DURABLE_CWD_OUTPUT_DELAY_MS = 250;
+const DURABLE_CWD_OUTPUT_THROTTLE_MS = 3000;
 
 /**
  * A deliberate shell exit (which collapses the pane/tab/workspace) is a clean
@@ -127,6 +129,9 @@ export class SessionManager {
   private paneInputEpochs = new Map<string, number>();
   private pausedSessions = new Map<string, ReturnType<typeof setInterval>>();
   private durableRefreshTimers = new Set<ReturnType<typeof setTimeout>>();
+  private durableCwdRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private durableCwdRefreshInFlight = new Set<string>();
+  private durableCwdLastReadAt = new Map<string, number>();
   private readonly currentMachines: () => MachineConfig[];
   private readonly terminalCheckpoints: TerminalCheckpointStore;
   private readonly durableEndpoints: DurableEndpointStore;
@@ -480,12 +485,17 @@ export class SessionManager {
     this.sessionMachines.set(pane.id, structuredClone(machine));
     this.durableEndpoints.bind(pane.id, machine, backend.id);
     this.state.updatePane(pane.id, { status: "running", exitCode: undefined, title: pane.title });
+    this.cancelPaneCwdRefresh(pane.id);
     this.schedulePaneCwdRefresh(pane, machine, session);
 
     session.on("output", (data) => {
       this.broadcastOutput(pane.id, data);
       this.applyBackpressure(pane.id, session);
       this.scheduleTerminalCheckpoint(pane.id, session);
+      this.schedulePaneCwdRefresh(pane, machine, session, {
+        delayMs: DURABLE_CWD_OUTPUT_DELAY_MS,
+        throttle: true,
+      });
     });
     session.on("title", (title) => {
       this.state.updatePane(pane.id, { title });
@@ -506,6 +516,7 @@ export class SessionManager {
     });
     session.on("exit", (code) => {
       if (this.ignoredSessionExits.has(session)) return;
+      this.cancelPaneCwdRefresh(pane.id);
       this.broadcast(pane.id, { type: "exit", paneId: pane.id, code });
       const uptimeMs = Date.now() - startedAt;
       if (!isDeliberateExit(code, uptimeMs)) {
@@ -561,19 +572,42 @@ export class SessionManager {
     return session;
   }
 
-  private schedulePaneCwdRefresh(pane: PaneState, machine: MachineConfig, session: BackendSession): void {
+  private schedulePaneCwdRefresh(
+    pane: PaneState,
+    machine: MachineConfig,
+    session: BackendSession,
+    options: {
+      delayMs?: number;
+      retryIndex?: number;
+      throttle?: boolean;
+    } = {},
+  ): void {
     const backend = this.backends.get(pane.id);
     if (!backend || backend.capabilities.cwd !== "multiplexer") return;
+    if (this.durableCwdRefreshTimers.has(pane.id) || this.durableCwdRefreshInFlight.has(pane.id)) return;
 
-    let retryIndex = 0;
+    const retryIndex = options.retryIndex ?? 0;
+    const throttleDelay = options.throttle
+      ? Math.max(
+          0,
+          (this.durableCwdLastReadAt.get(pane.id) ?? 0)
+            + DURABLE_CWD_OUTPUT_THROTTLE_MS
+            - Date.now(),
+        )
+      : 0;
+    const delayMs = Math.max(options.delayMs ?? 0, throttleDelay);
     const refresh = async (): Promise<void> => {
       if (this.sessions.get(pane.id) !== session || session.isExited) return;
+      this.durableCwdRefreshInFlight.add(pane.id);
+      this.durableCwdLastReadAt.set(pane.id, Date.now());
       const cwdBeforeRead = this.state.findPane(pane.id)?.cwd;
       let cwd: string | undefined;
       try {
         cwd = await backend.readCwd(pane.id);
       } catch {
         cwd = undefined;
+      } finally {
+        this.durableCwdRefreshInFlight.delete(pane.id);
       }
       if (this.sessions.get(pane.id) !== session || session.isExited) return;
       const currentPane = this.state.findPane(pane.id);
@@ -584,16 +618,31 @@ export class SessionManager {
       }
 
       const delayMs = DURABLE_CWD_REFRESH_RETRY_DELAYS_MS[retryIndex];
-      retryIndex += 1;
       if (delayMs === undefined) return;
-      const timer = setTimeout(() => {
-        this.durableRefreshTimers.delete(timer);
-        void refresh();
-      }, delayMs);
-      timer.unref?.();
-      this.durableRefreshTimers.add(timer);
+      this.schedulePaneCwdRefresh(pane, machine, session, {
+        delayMs,
+        retryIndex: retryIndex + 1,
+      });
     };
-    void refresh();
+    const timer = setTimeout(() => {
+      this.durableRefreshTimers.delete(timer);
+      this.durableCwdRefreshTimers.delete(pane.id);
+      void refresh();
+    }, delayMs);
+    timer.unref?.();
+    this.durableRefreshTimers.add(timer);
+    this.durableCwdRefreshTimers.set(pane.id, timer);
+  }
+
+  private cancelPaneCwdRefresh(paneId: string): void {
+    const timer = this.durableCwdRefreshTimers.get(paneId);
+    if (timer) {
+      clearTimeout(timer);
+      this.durableRefreshTimers.delete(timer);
+      this.durableCwdRefreshTimers.delete(paneId);
+    }
+    this.durableCwdRefreshInFlight.delete(paneId);
+    this.durableCwdLastReadAt.delete(paneId);
   }
 
   private broadcast(paneId: string, payload: PaneServerMessage): void {
@@ -655,6 +704,9 @@ export class SessionManager {
     }
     for (const timer of this.durableRefreshTimers) clearTimeout(timer);
     this.durableRefreshTimers.clear();
+    this.durableCwdRefreshTimers.clear();
+    this.durableCwdRefreshInFlight.clear();
+    this.durableCwdLastReadAt.clear();
     for (const timer of this.pausedSessions.values()) clearInterval(timer);
     this.pausedSessions.clear();
     for (const session of this.sessions.values()) {
@@ -711,6 +763,7 @@ export class SessionManager {
     const existing = this.sessions.get(pane.id);
     if (!existing || existing.isExited) return false;
     this.ignoredSessionExits.add(existing);
+    this.cancelPaneCwdRefresh(pane.id);
     this.sessions.delete(pane.id);
     this.resizeOwners.delete(pane.id);
     const backend = this.backends.get(pane.id);
@@ -802,6 +855,7 @@ export class SessionManager {
     const backend = this.backends.get(paneId);
     const sessionMachine = this.sessionMachines.get(paneId);
     const endpointRecords = this.durableEndpoints.recordsForPane(paneId);
+    this.cancelPaneCwdRefresh(paneId);
     this.sessions.delete(paneId);
     this.backends.delete(paneId);
     this.sessionMachines.delete(paneId);

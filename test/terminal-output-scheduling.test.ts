@@ -95,23 +95,31 @@ test("wheel scrolling cancels opposite-direction pending deltas and disposes fra
 test("touch scrolling distinguishes taps and converts swipes into terminal lines", () => {
   const gesture = createTouchScrollGesture();
 
-  gesture.start(1, 100);
-  assert.deepEqual(gesture.move(1, 95, 20), { handled: false, lines: 0 });
+  gesture.start(1, 20, 100);
+  assert.deepEqual(gesture.move(1, 20, 95, 20), { handled: false, lines: 0 });
   assert.deepEqual(gesture.end(1), { handled: true, tap: true });
 
-  gesture.start(2, 100);
-  assert.deepEqual(gesture.move(2, 60, 20), { handled: true, lines: 2 });
-  assert.deepEqual(gesture.move(2, 50, 20), { handled: true, lines: 0 });
-  assert.deepEqual(gesture.move(2, 40, 20), { handled: true, lines: 1 });
+  gesture.start(2, 20, 100);
+  assert.deepEqual(gesture.move(2, 22, 60, 20), { handled: true, lines: 2 });
+  assert.deepEqual(gesture.move(2, 23, 50, 20), { handled: true, lines: 0 });
+  assert.deepEqual(gesture.move(2, 24, 40, 20), { handled: true, lines: 1 });
   assert.deepEqual(gesture.end(2), { handled: true, tap: false });
 });
 
 test("touch scrolling ignores unrelated pointers and resets cancelled gestures", () => {
   const gesture = createTouchScrollGesture();
-  gesture.start(3, 20);
-  assert.deepEqual(gesture.move(4, 60, 20), { handled: false, lines: 0 });
+  gesture.start(3, 20, 20);
+  assert.deepEqual(gesture.move(4, 20, 60, 20), { handled: false, lines: 0 });
   assert.deepEqual(gesture.end(4), { handled: false, tap: false });
-  assert.deepEqual(gesture.move(3, 60, 20), { handled: true, lines: -2 });
+  assert.deepEqual(gesture.move(3, 20, 60, 20), { handled: true, lines: -2 });
   gesture.cancel();
   assert.deepEqual(gesture.end(3), { handled: false, tap: false });
+});
+
+test("touch scrolling direction-locks horizontal swipes without emitting wheel lines", () => {
+  const gesture = createTouchScrollGesture();
+  gesture.start(5, 2, 100);
+  assert.deepEqual(gesture.move(5, 42, 106, 20), { handled: true, lines: 0 });
+  assert.deepEqual(gesture.move(5, 80, 118, 20), { handled: true, lines: 0 });
+  assert.deepEqual(gesture.end(5), { handled: true, tap: false });
 });

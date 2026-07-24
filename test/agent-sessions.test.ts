@@ -6,6 +6,7 @@ import { test } from "node:test";
 import {
   AgentSessionService,
   DELEGATION_TRANSITIONS,
+  monotonicAgentTimestamp,
   TERMINAL_DELEGATION_STATES,
 } from "../src/server/agent-sessions.js";
 import { StateStore } from "../src/server/state.js";
@@ -42,6 +43,16 @@ test("delegation transitions make terminal states immutable", () => {
     assert.ok(DELEGATION_TRANSITIONS[state].includes("completed"));
     assert.ok(DELEGATION_TRANSITIONS[state].includes("interrupted"));
   }
+});
+
+test("agent timestamps advance when transitions share one clock tick", () => {
+  assert.equal(
+    monotonicAgentTimestamp(
+      ["2026-07-24T21:08:50.543Z"],
+      Date.parse("2026-07-24T21:08:50.543Z"),
+    ),
+    "2026-07-24T21:08:50.544Z",
+  );
 });
 
 test("agent sessions own lifecycle, title, and notification updates", () => {
@@ -215,7 +226,9 @@ test("state-age budgets notify once with the transition timeline entry", () => {
     assert.equal(waitingEvent.notification?.subtitle, "login required");
     const waiting = agents.delegationForRun("run-budget");
     assert.ok(waiting);
-    assert.notEqual(waiting.stateChangedAt, running.stateChangedAt);
+    assert.ok(
+      Date.parse(waiting.stateChangedAt) > Date.parse(running.stateChangedAt),
+    );
     assert.equal(waiting.budgetNotifiedAt, undefined);
 
     const waitingNotifications = agents.notifyExceededStateBudgets(
