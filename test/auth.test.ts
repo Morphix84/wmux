@@ -17,6 +17,8 @@ import {
   verifyCredentials,
   type AuthConfig,
 } from "../src/server/auth.js";
+import { BROWSER_SESSION_COOKIE } from "../src/server/browser-session-cookie.js";
+import { BrowserSessionStore } from "../src/server/browser-session-store.js";
 
 const fakeRequest = (headers: Record<string, string> = {}): http.IncomingMessage =>
   ({ headers } as unknown as http.IncomingMessage);
@@ -302,6 +304,58 @@ test("request authentication returns typed principals and keeps scoped tokens he
   assert.equal(authenticateRequest(auth, fakeRequest(), urlWith(`?token=${"A".repeat(43)}`)).kind, "anonymous");
   assert.equal(authenticateRequest(auth, fakeRequest(), urlWith(`?token=${"H".repeat(43)}`)).kind, "anonymous");
   assert.equal(authenticateRequest({ ...auth, browserAuthMode: "login-only" }, fakeRequest({ authorization: "Bearer s3cret" }), urlWith()).kind, "anonymous");
+});
+
+test("login-only browser authentication accepts only server-backed cookies", () => {
+  const now = 1_000_000;
+  const auth = baseAuth({ browserAuthMode: "login-only" });
+  const sessions = new BrowserSessionStore(auth.sessionSecret);
+  const issued = sessions.issue(60_000, now);
+  const cookieRequest = fakeRequest({
+    cookie: `${BROWSER_SESSION_COOKIE}=${issued.token}`,
+  });
+  const principal = authenticateRequest(
+    auth,
+    cookieRequest,
+    urlWith(),
+    now + 30_000,
+    sessions,
+  );
+  assert.equal(principal.kind, "browser-session");
+  assert.equal(
+    principal.kind === "browser-session" ? principal.sessionId : undefined,
+    issued.id,
+  );
+  assert.equal(
+    authenticateRequest(
+      auth,
+      fakeRequest({ authorization: `Bearer ${issued.token}` }),
+      urlWith(),
+      now + 30_000,
+      sessions,
+    ).kind,
+    "anonymous",
+  );
+  assert.equal(
+    authenticateRequest(
+      auth,
+      fakeRequest(),
+      urlWith(`?token=${issued.token}`),
+      now + 30_000,
+      sessions,
+    ).kind,
+    "anonymous",
+  );
+  assert.equal(
+    authenticateRequest(
+      auth,
+      cookieRequest,
+      urlWith(),
+      now + 120_000,
+      sessions,
+    ).kind,
+    "anonymous",
+  );
 });
 
 test("loadAuthConfig does not mark an existing or environment token as newly generated", () => {

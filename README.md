@@ -348,10 +348,12 @@ Within the private Host/Origin/bind boundary, only `/api/health`, auth metadata,
 - On first start, wmux creates `~/.wmux/token` and prints a one-time browser URL
   containing that token. Set `WMUX_TOKEN` or `WMUX_TOKEN_PATH` to supply one.
 - Configure browser password login with
-  `scripts/wmux-set-password --username you`. Login sessions last 30 days and
-  survive restarts through `~/.wmux/session-secret`. Restart a running service
-  with `systemctl --user restart wmux.service` after changing credentials; the
-  helper prints this reminder after updating the credential file.
+  `scripts/wmux-set-password --username you`.
+  Login sessions last 30 days.
+  In `shared-or-login` mode they remain signed compatibility tokens protected by `~/.wmux/session-secret`.
+  In `login-only` mode the browser receives an opaque HttpOnly SameSite cookie and wmux persists only its keyed digest in owner-only `~/.wmux/browser-sessions.json`.
+  Set `WMUX_BROWSER_SESSION_PATH` to override that record path.
+  Restart a running service with `systemctl --user restart wmux.service` after changing credentials; the helper prints this reminder after updating the credential file.
 - `WMUX_DISABLE_AUTH=1` disables token checks only for deliberately isolated
   environments; it does not make public deployment supported.
 - `WMUX_BROWSER_AUTH_MODE` defaults to `shared-or-login`, preserving existing shared-token URLs, `wmuxctl`, helpers, registration, and WebSockets.
@@ -365,7 +367,9 @@ Within the private Host/Origin/bind boundary, only `/api/health`, auth metadata,
   Both use authorization headers only; scoped credentials are forbidden in query parameters and never fall back or retry across scopes.
   Registration remains separate.
 - The browser must pass the password-session gate before bootstrap or browser WebSockets.
-  The MVP still retains browser session material in localStorage and browser WebSocket query transport; cookie sessions, CSRF protection, revocation, and finer capabilities remain deferred.
+  In `login-only` mode the browser session is never returned to JavaScript, local storage, or a URL.
+  REST and WebSocket requests authenticate through the HttpOnly SameSite cookie, with `Secure` added for direct TLS or an HTTPS `WMUX_PUBLIC_URL`.
+  Session inventory/revocation and finer per-client capabilities remain deferred.
   wmux is not a public-Internet deployment.
 - Use HTTPS away from loopback and treat every token as a password.
 - Keep helper, clipboard, media, agent, and streaming endpoints behind the same

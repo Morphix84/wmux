@@ -2,6 +2,7 @@ import {
   issueSessionToken,
   verifyCredentials,
 } from "../auth.js";
+import { browserSessionCookie } from "../browser-session-cookie.js";
 import { normalizeIpAddress, observedClientAddress } from "../proxy-address.js";
 import {
   type ApiRoute,
@@ -70,8 +71,36 @@ export const authRoutes: readonly ApiRoute[] = [
         return;
       }
       loginAttempts.reset(clientAddress);
-      const token = issueSessionToken(auth.sessionSecret, SESSION_TTL_MS, Date.now());
-      sendJson(200, { token, expiresInMs: SESSION_TTL_MS }, { "cache-control": "no-store" });
+      const nowMs = Date.now();
+      if ((auth.browserAuthMode ?? "shared-or-login") === "login-only") {
+        if (!deps.browserSessions) {
+          throw new Error("login-only browser session store is unavailable");
+        }
+        const session = deps.browserSessions.issue(SESSION_TTL_MS, nowMs);
+        sendJson(
+          200,
+          { authenticated: true, expiresInMs: SESSION_TTL_MS },
+          {
+            "cache-control": "no-store",
+            "set-cookie": browserSessionCookie(
+              session.token,
+              session.expiresAt,
+              Boolean(deps.browserSessionCookieSecure),
+            ),
+          },
+        );
+        return;
+      }
+      const token = issueSessionToken(
+        auth.sessionSecret,
+        SESSION_TTL_MS,
+        nowMs,
+      );
+      sendJson(
+        200,
+        { token, expiresInMs: SESSION_TTL_MS },
+        { "cache-control": "no-store" },
+      );
     },
   },
   {

@@ -35,6 +35,11 @@ import {
   serveStaticRequest,
 } from "./static-files.js";
 import type { MachineConfig } from "./types.js";
+import type { BrowserSessionStore } from "./browser-session-store.js";
+import {
+  expiredBrowserSessionCookie,
+  requestBrowserSessionCookie,
+} from "./browser-session-cookie.js";
 
 const MAX_JSON_BODY = 1024 * 1024;
 
@@ -109,6 +114,7 @@ interface RequestDispatcherOptions {
   bindHost: string;
   protocol: "http" | "https";
   auth: AuthConfig;
+  browserSessions?: BrowserSessionStore;
   registrationToken?: string;
   hostRegistry?: HostRegistry;
   currentMachines: () => MachineConfig[];
@@ -177,7 +183,13 @@ export const createRequestHandler = (
       ? registeredHelperPrincipal
       : registrationPost
         ? registrationAuth
-        : authenticateRequest(options.auth, request, url);
+        : authenticateRequest(
+          options.auth,
+          request,
+          url,
+          Date.now(),
+          options.browserSessions,
+        );
     const registeredWindowsEndpoint = helperMachine?.source === "registered"
       && (
         routePolicy.id === "windows-bootstrap"
@@ -194,10 +206,20 @@ export const createRequestHandler = (
       wrongRegisteredWindowsPrincipal
       || !authorizeHttpPrincipal(options.auth, principal, routePolicy)
     ) {
+      const clearInvalidBrowserSession = principal.kind === "anonymous"
+        && (options.auth.browserAuthMode ?? "shared-or-login") === "login-only"
+        && Boolean(requestBrowserSessionCookie(request));
       sendJson(
         response,
         principal.kind === "anonymous" ? 401 : 403,
         { error: "unauthorized" },
+        clearInvalidBrowserSession
+          ? {
+              "set-cookie": expiredBrowserSessionCookie(
+                Boolean(options.deps.browserSessionCookieSecure),
+              ),
+            }
+          : {},
       );
       return;
     }

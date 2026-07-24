@@ -3,6 +3,8 @@ import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
+import { requestBrowserSessionCookie } from "./browser-session-cookie.js";
+import type { BrowserSessionStore } from "./browser-session-store.js";
 
 const wmuxHome = (): string => path.join(os.homedir(), ".wmux");
 const defaultTokenPath = (): string => path.join(wmuxHome(), "token");
@@ -20,7 +22,7 @@ export type BrowserAuthMode = "shared-or-login" | "login-only";
 export type AuthPrincipal =
   | { kind: "anonymous" }
   | { kind: "legacy-shared" }
-  | { kind: "browser-session"; expiresAt: number }
+  | { kind: "browser-session"; expiresAt: number; sessionId?: string }
   | { kind: "automation" }
   | { kind: "helper" }
   | { kind: "registration" }
@@ -393,19 +395,35 @@ export const authenticateRequest = (
   request: http.IncomingMessage,
   url: URL,
   nowMs: number = Date.now(),
+  browserSessions?: BrowserSessionStore,
 ): AuthPrincipal => {
   if (!auth.enabled) return { kind: "anonymous" };
+  const browserAuthMode = auth.browserAuthMode ?? "shared-or-login";
   const bearer = requestBearerToken(request);
   if (bearer) {
     if (auth.automationToken && tokensMatch(auth.automationToken, bearer)) return { kind: "automation" };
     if (auth.helperToken && tokensMatch(auth.helperToken, bearer)) return { kind: "helper" };
-    if ((auth.browserAuthMode ?? "shared-or-login") === "shared-or-login" && tokensMatch(auth.token, bearer)) return { kind: "legacy-shared" };
+    if (browserAuthMode === "login-only") return { kind: "anonymous" };
+    if (tokensMatch(auth.token, bearer)) return { kind: "legacy-shared" };
     const expiresAt = auth.sessionSecret ? verifySessionToken(auth.sessionSecret, bearer, nowMs) : null;
     if (expiresAt !== null) return { kind: "browser-session", expiresAt };
     return { kind: "anonymous" };
   }
+  if (browserAuthMode === "login-only") {
+    const session = browserSessions?.authenticate(
+      requestBrowserSessionCookie(request),
+      nowMs,
+    );
+    return session
+      ? {
+          kind: "browser-session",
+          expiresAt: session.expiresAt,
+          sessionId: session.id,
+        }
+      : { kind: "anonymous" };
+  }
   const queryToken = url.searchParams.get("token")?.trim() || null;
-  if ((auth.browserAuthMode ?? "shared-or-login") === "shared-or-login" && tokensMatch(auth.token, queryToken)) {
+  if (tokensMatch(auth.token, queryToken)) {
     return { kind: "legacy-shared" };
   }
   const expiresAt = queryToken && auth.sessionSecret

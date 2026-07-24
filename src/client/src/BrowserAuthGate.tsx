@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api, UnauthorizedError } from "./api";
 import { App } from "./App";
 import { LoginView } from "./LoginView";
-import { clearNonSessionToken, getToken, setToken } from "./token";
+import { setToken } from "./token";
 
 type GateState = "checking" | "compatibility" | "login" | "authenticated" | "unavailable";
 
@@ -50,11 +50,7 @@ export const BrowserAuthGate = () => {
         setState("compatibility");
         return;
       }
-      clearNonSessionToken();
-      if (!getToken()) {
-        setState("login");
-        return;
-      }
+      setToken("");
       try {
         await retryTransient(api.authSession);
         if (!cancelled) setState("authenticated");

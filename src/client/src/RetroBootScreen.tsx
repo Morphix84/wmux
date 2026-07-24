@@ -122,7 +122,7 @@ function RetroTerminalBootScreen({
       try {
         const result = await api.login(username, password);
         if (cancelled) return;
-        setToken(result.token);
+        if (result.token) setToken(result.token);
         onAuthenticatedRef.current();
       } catch {
         if (cancelled) return;

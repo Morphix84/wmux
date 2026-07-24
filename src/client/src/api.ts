@@ -92,7 +92,14 @@ export const api = {
     return response.json() as Promise<AuthInfo>;
   },
   authSession: () => json<{ authenticated: true }>("/api/auth/session"),
-  login: async (username: string, password: string): Promise<{ token: string; expiresInMs: number }> => {
+  login: async (
+    username: string,
+    password: string,
+  ): Promise<{
+    token?: string;
+    authenticated?: true;
+    expiresInMs: number;
+  }> => {
     const response = await fetch("/api/login", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -100,7 +107,11 @@ export const api = {
     });
     if (response.status === 401) throw new Error("Invalid username or password");
     if (!response.ok) throw new Error(await response.text());
-    return response.json() as Promise<{ token: string; expiresInMs: number }>;
+    return response.json() as Promise<{
+      token?: string;
+      authenticated?: true;
+      expiresInMs: number;
+    }>;
   },
   streams: () => json<{ streams: BootstrapPayload["streams"] }>("/api/streams"),
   requestStream: (machineId: string, requestId: string, ttlMs: number) =>

@@ -10,7 +10,7 @@ interface LoginViewProps {
 
 /**
  * Shown when the app is unauthenticated. If credential login is configured it
- * offers a username/password form (minting a session token); otherwise it
+ * offers a username/password form; otherwise it
  * explains the token-URL path used by machine clients.
  */
 export const LoginView = ({ embedded = false, loginEnabled, onAuthenticated }: LoginViewProps) => {
@@ -26,7 +26,7 @@ export const LoginView = ({ embedded = false, loginEnabled, onAuthenticated }: L
     setError(null);
     try {
       const { token } = await api.login(username, password);
-      setToken(token);
+      if (token) setToken(token);
       onAuthenticated();
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "Login failed");
