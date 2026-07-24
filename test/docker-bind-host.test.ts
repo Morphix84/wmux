@@ -42,3 +42,10 @@ test("publish host validation accepts private addresses and rejects wildcard or 
 test("Dockerfile does not require BuildKit-only COPY flags", () => {
   assert.doesNotMatch(dockerfile, /^COPY\s+--chmod(?:=|\s)/m);
 });
+
+test("Docker build stage includes every repository build script", () => {
+  assert.match(
+    dockerfile,
+    /FROM dependencies AS build[\s\S]*COPY scripts \.\/scripts[\s\S]*RUN npm run build/,
+  );
+});

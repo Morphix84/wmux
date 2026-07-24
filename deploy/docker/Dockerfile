@@ -14,7 +14,7 @@ RUN npm ci
 FROM dependencies AS build
 
 COPY tsconfig.json tsconfig.server.json vite.config.ts ./
-COPY scripts/build-client.mjs ./scripts/build-client.mjs
+COPY scripts ./scripts
 COPY src ./src
 RUN npm run build
 
