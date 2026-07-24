@@ -906,11 +906,11 @@ npm run check
 npm run test:e2e
 ```
 
-- `npm run check` runs unit/integration tests, both TypeScript checks, helper
-  syntax validation, and the production build.
-- `npm run test:e2e` exercises desktop Chromium plus phone-sized Chromium and
-  WebKit against an isolated loopback-only service.
+- `npm run check` runs unit/integration tests, both TypeScript checks, helper syntax validation, and the production build.
+- `npm run test:e2e` exercises desktop Chromium plus phone-sized Chromium and WebKit against an isolated loopback-only service.
 - `npm run test:e2e:chromium` is the faster browser subset.
+- `npm run test:e2e:shard:1` and `npm run test:e2e:shard:2` divide the standard browser matrix for parallel runners.
+- `WMUX_E2E_SERVER_HOST=<private-ip> npm run test:e2e:serve` exposes an isolated fixture service to a trusted private-network runner, which uses `WMUX_E2E_BASE_URL=http://<private-ip>:3491`.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow and
 [AGENTS.md](AGENTS.md) for engineering constraints and the complete list of

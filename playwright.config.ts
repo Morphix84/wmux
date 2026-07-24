@@ -1,24 +1,10 @@
-import fs from "node:fs";
-import path from "node:path";
 import { defineConfig, devices } from "@playwright/test";
+import { prepareStandardE2eRuntime } from "./e2e/standard-runtime.js";
 
 const port = 3489;
-const runtimeDir = path.resolve("test-results", `e2e-runtime-${process.pid}`);
-fs.mkdirSync(runtimeDir, { recursive: true, mode: 0o700 });
-fs.chmodSync(runtimeDir, 0o700);
-const runtimeHome = path.join(runtimeDir, "home");
-fs.mkdirSync(runtimeHome, { recursive: true, mode: 0o700 });
-fs.chmodSync(runtimeHome, 0o700);
-const runtimeConfigPath = path.join(runtimeDir, "wmux.config.json");
-const fixtureConfig = JSON.parse(
-  fs.readFileSync(path.resolve("e2e", "fixtures", "wmux.config.json"), "utf8"),
-) as {
-  machines: Array<Record<string, unknown>>;
-};
-for (const machine of fixtureConfig.machines) {
-  if (machine.id === "local") machine.cwd = process.cwd();
-}
-fs.writeFileSync(runtimeConfigPath, JSON.stringify(fixtureConfig, null, 2));
+const externalBaseURL = process.env.WMUX_E2E_BASE_URL?.trim().replace(/\/+$/, "");
+const baseURL = externalBaseURL || `http://127.0.0.1:${port}`;
+const runtime = externalBaseURL ? undefined : prepareStandardE2eRuntime({ baseURL });
 
 export default defineConfig({
   testDir: "./e2e",
@@ -30,34 +16,21 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [["line"], ["html", { outputFolder: "test-results/playwright-report", open: "never" }]] : "line",
   use: {
-    baseURL: `http://127.0.0.1:${port}`,
+    baseURL,
     reducedMotion: "reduce",
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },
-  webServer: {
+  webServer: runtime ? {
     command: `node --import tsx src/server/index.ts --dev --host 127.0.0.1 --port ${port}`,
     url: `http://127.0.0.1:${port}/api/health`,
     reuseExistingServer: false,
     timeout: 120_000,
     env: {
       ...process.env,
-      HOME: runtimeHome,
-      WMUX_DISABLE_AUTH: "1",
-      WMUX_REGISTRATION_TOKEN: "e2e-registration-token",
-      WMUX_CONFIG_PATH: runtimeConfigPath,
-      WMUX_MANAGED_CONFIG_PATH: path.join(runtimeDir, "managed-config.json"),
-      WMUX_STATE_PATH: path.join(runtimeDir, "state.json"),
-      WMUX_SETTINGS_PATH: path.join(runtimeDir, "settings.json"),
-      WMUX_AGENT_TIMELINE_PATH: path.join(runtimeDir, "agent-timelines.json"),
-      WMUX_ATTACHMENT_DIR: path.join(runtimeDir, "attachments"),
-      WMUX_PUBLIC_URL: `http://127.0.0.1:${port}`,
-      WMUX_HELPER_URL: `http://127.0.0.1:${port}`,
-      WMUX_CERT_FILE: "",
-      WMUX_KEY_FILE: "",
-      PATH: `${path.resolve("e2e", "fixtures", "bin")}${path.delimiter}${process.env.PATH ?? ""}`,
+      ...runtime.environment,
     },
-  },
+  } : undefined,
   projects: [
     {
       name: "chromium",
