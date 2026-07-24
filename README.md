@@ -164,6 +164,7 @@ cp wmux.config.example.json wmux.config.json
 {
   "terminalFontFamily": "\"MesloLGM Nerd Font\"",
   "terminalFontSize": 15,
+  "shellCommandTracking": false,
   "delegation": {
     "preferHeadless": false,
     "waitTimeoutSeconds": {
@@ -217,6 +218,10 @@ cp wmux.config.example.json wmux.config.json
   Other preferred fonts must be installed on each browser device, and wmux appends its bundled Fira Code/monospace fallback stack.
 - `terminalFontFamily` is config-only.
   Settings saved in `~/.wmux/settings.json` can override `terminalFontSize`; use **Settings → Reset → Save** to adopt a changed size default.
+- `shellCommandTracking` opts wmux-managed interactive bash and zsh sessions into best-effort preexec/precmd reporting through the existing Activity run history.
+  It defaults to `false`, does not modify non-wmux-managed or unsupported shells, and takes effect for newly created panes after wmux restarts.
+  Command text is persisted in wmux state, so leave this disabled when shell commands may contain secrets.
+  Existing shell traps and unusual prompt frameworks can prevent detection; use `wmux-run` when exact tracking is required.
 - `delegation.waitTimeoutSeconds` configures how long synchronous delegation controllers watch before detaching.
   Review mode defaults to 1,800 seconds, while change and deploy modes default to 7,200 seconds.
   Values must be from 0.1 through 14,400 seconds.
@@ -518,6 +523,7 @@ Windows panes stage matching helpers when a new pane starts.
 | `wmux-notify` | Create browser and terminal notifications |
 | `wmux-agent-event` | Record agent lifecycle and response metadata |
 | `wmux-run` | Track a command, duration, and exit status in Activity |
+| `wmux-shell-run-event` | Internal staged reporter used by opt-in managed-shell hooks |
 | `wmux-media` | Render images, audio, or video through the browser |
 | `wmux-copy` / `wclip` | Hand text to the browser clipboard |
 | `wmux-hooks` | Install Claude, Codex, or OpenCode lifecycle hooks |

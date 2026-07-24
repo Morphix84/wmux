@@ -622,6 +622,21 @@ export class StateStore extends EventEmitter {
 
     if (existingIndex !== -1) {
       const [existing] = this.state.runs.splice(existingIndex, 1);
+      const lateStart = status === "started" && existing.status !== "started";
+      if (lateStart) {
+        if (command) existing.command = command;
+        const reportedStartedAt = validIsoDate(input.startedAt);
+        if (
+          reportedStartedAt
+          && Date.parse(reportedStartedAt) < Date.parse(existing.startedAt)
+        ) {
+          existing.startedAt = reportedStartedAt;
+        }
+        this.state.runs.unshift(existing);
+        this.save();
+        this.emit("run", structuredClone(existing));
+        return structuredClone(existing);
+      }
       existing.workspaceId = target.workspace.id;
       existing.tabId = target.tab.id;
       existing.paneId = target.pane.id;

@@ -51,6 +51,35 @@ test("fresh state storage creates an owner-only directory", () => {
   });
 });
 
+test("a late shell start event cannot regress a terminal run", () => {
+  withTempState((filePath) => {
+    const store = new StateStore(machines, filePath);
+    const workspace = store.snapshot().workspaces[0];
+    const pane = workspace.tabs[0].panes[0];
+    const finished = store.recordRunEvent({
+      runId: "run_shell_test",
+      paneId: pane.id,
+      command: "make test",
+      status: "failed",
+      exitCode: 7,
+      completedAt: "2026-07-24T12:00:02.000Z",
+    });
+    const lateStart = store.recordRunEvent({
+      runId: "run_shell_test",
+      paneId: pane.id,
+      command: "make test",
+      status: "started",
+      startedAt: "2026-07-24T12:00:00.000Z",
+    });
+
+    assert.equal(finished.status, "failed");
+    assert.equal(lateStart.status, "failed");
+    assert.equal(lateStart.exitCode, 7);
+    assert.equal(lateStart.startedAt, "2026-07-24T12:00:00.000Z");
+    assert.equal(lateStart.completedAt, "2026-07-24T12:00:02.000Z");
+  });
+});
+
 test("agent workspace children are preorder-first and parent deletion promotes them", () => {
   withTempState((filePath) => {
     const store = new StateStore(machines, filePath);

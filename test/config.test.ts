@@ -79,6 +79,12 @@ test("validates terminal typography defaults", () => {
   }
 });
 
+test("shell command tracking is opt-in", () => {
+  assert.equal(loadConfig().shellCommandTracking, false);
+  assert.equal(configSchema.parse({ shellCommandTracking: true }).shellCommandTracking, true);
+  assert.equal(configSchema.safeParse({ shellCommandTracking: "true" }).success, false);
+});
+
 test("delegation wait defaults are mode-aware and config overrides are bounded", () => {
   assert.deepEqual(loadConfig().delegation.waitTimeoutSeconds, DEFAULT_DELEGATION_WAIT_TIMEOUT_SECONDS);
   assert.deepEqual(
@@ -152,12 +158,14 @@ test("WMUX_CONFIG_PATH isolates explicit runtime and test configuration", () => 
       ...machine({ id: "isolated", name: "Isolated" }),
       terminalFontFamily: '"JetBrains Mono"',
       terminalFontSize: 16,
+      shellCommandTracking: true,
     }));
     process.env.WMUX_CONFIG_PATH = configPath;
     const config = loadConfig();
     assert.deepEqual(config.machines.map((entry) => entry.id), ["local", "isolated"]);
     assert.equal(config.terminalFontFamily, '"JetBrains Mono"');
     assert.equal(config.terminalFontSize, 16);
+    assert.equal(config.shellCommandTracking, true);
     process.env.WMUX_CONFIG_PATH = path.join(dir, "missing.json");
     assert.throws(() => loadConfig(), /WMUX_CONFIG_PATH does not exist/);
   } finally {

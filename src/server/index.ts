@@ -111,7 +111,10 @@ const main = async (): Promise<void> => {
     (machineId) => hostRegistry.bootstrapToken(machineId),
     () => hostRegistry.sweep(),
     undefined,
-    () => terminalThemeEnvironment(settings.snapshot().colorScheme),
+    () => ({
+      ...terminalThemeEnvironment(settings.snapshot().colorScheme),
+      ...(config.shellCommandTracking ? { WMUX_SHELL_COMMAND_TRACKING: "1" } : {}),
+    }),
     () => auth.helperToken ?? "",
     auth.browserAuthMode ?? "shared-or-login",
     agentSessions,

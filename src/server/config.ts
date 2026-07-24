@@ -148,6 +148,7 @@ export const configSchema = z.object({
     .regex(/^[^\x00-\x1f\x7f]+$/, "terminal font family must not contain control characters")
     .optional(),
   terminalFontSize: z.number().int().min(MIN_TERMINAL_FONT_SIZE).max(MAX_TERMINAL_FONT_SIZE).optional(),
+  shellCommandTracking: z.boolean().optional(),
   delegation: delegationSchema.optional(),
 }).superRefine((config, context) => {
   const overrides = config.keybindings as KeybindingOverrides | undefined;
@@ -162,6 +163,7 @@ export interface AppConfig {
   keybindings: KeybindingMap;
   terminalFontFamily?: string;
   terminalFontSize?: number;
+  shellCommandTracking: boolean;
   delegation: DelegationConfig;
 }
 
@@ -219,6 +221,7 @@ export const loadConfig = (): AppConfig => {
       keybindings,
       terminalFontFamily: parsed.terminalFontFamily,
       terminalFontSize: parsed.terminalFontSize,
+      shellCommandTracking: parsed.shellCommandTracking ?? false,
       delegation: resolveDelegationConfig(
         parsed.delegation?.waitTimeoutSeconds,
         parsed.delegation?.preferHeadless,
@@ -232,6 +235,7 @@ export const loadConfig = (): AppConfig => {
   return {
     machines: [localMachine()],
     keybindings: resolveKeybindings(),
+    shellCommandTracking: false,
     delegation: resolveDelegationConfig(),
   };
 };

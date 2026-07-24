@@ -35,6 +35,7 @@ export default defineConfig({
       WMUX_AGENT_TIMELINE_PATH: path.join(runtime.directory, "agent-timelines.json"),
       WMUX_ATTACHMENT_DIR: path.join(runtime.directory, "attachments"),
       WMUX_PUBLIC_URL: `http://127.0.0.1:${port}`,
+      WMUX_HELPER_URL: `http://127.0.0.1:${port}`,
       WMUX_CERT_FILE: "",
       WMUX_KEY_FILE: "",
     },
