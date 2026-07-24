@@ -1,8 +1,13 @@
 import { z } from "zod";
 import { machineSchema } from "./config.js";
-import type { DelegationRecord, LayoutNode, PersistedState } from "./types.js";
+import type {
+  DelegationAttentionReason,
+  DelegationRecord,
+  LayoutNode,
+  PersistedState,
+} from "./types.js";
 
-export const CURRENT_STATE_SCHEMA_VERSION = 4;
+export const CURRENT_STATE_SCHEMA_VERSION = 5;
 
 export class UnsupportedStateVersionError extends Error {
   constructor(readonly version: number) {
@@ -100,6 +105,12 @@ const delegationStateSchema = z.enum([
   "timed_out",
   "interrupted",
 ]);
+const delegationAttentionReasonSchema = z.enum([
+  "approval",
+  "login",
+  "blocked",
+  "input",
+]);
 
 const delegationSchema: z.ZodType<DelegationRecord> = z.object({
   runId: delegationRunIdSchema,
@@ -110,10 +121,12 @@ const delegationSchema: z.ZodType<DelegationRecord> = z.object({
   summary: z.string().max(2000),
   result: z.string().max(64_000),
   error: z.string().max(64_000),
+  attentionReason: delegationAttentionReasonSchema.optional(),
   observerError: z.string().max(64_000).optional(),
   workspaceId: idSchema,
   tabId: idSchema,
   paneId: idSchema,
+  machineId: idSchema.optional(),
   createdAt: timestampSchema,
   updatedAt: timestampSchema,
 }).strict();
@@ -272,6 +285,87 @@ export const migrateV3ToV4State = (record: Record<string, unknown>): Record<stri
     : record.delegations,
 });
 
+const inferDelegationAttentionReason = (
+  delegation: Record<string, unknown>,
+): DelegationAttentionReason | undefined => {
+  const text = [
+    delegation.summary,
+    delegation.result,
+    delegation.error,
+  ].filter((value): value is string => typeof value === "string").join(" ").toLowerCase();
+  if (
+    /["']outcome["']\s*:\s*["']blocked["']/.test(text)
+    || (
+      delegation.state === "failed"
+      && /\b(blocked|cannot proceed|unable to proceed)\b/.test(text)
+    )
+  ) {
+    return "blocked";
+  }
+  if (/\b(login|log in|sign in|authenticate|authentication)\b/.test(text)) return "login";
+  if (/\b(approval|approve|permission|confirm)\b/.test(text)) return "approval";
+  return delegation.state === "waiting" ? "input" : undefined;
+};
+
+const machineIdForDelegation = (
+  record: Record<string, unknown>,
+  delegation: Record<string, unknown>,
+): string | undefined => {
+  if (!Array.isArray(record.workspaces)) return undefined;
+  const workspace = record.workspaces.find(
+    (candidate) =>
+      candidate
+      && typeof candidate === "object"
+      && !Array.isArray(candidate)
+      && (candidate as Record<string, unknown>).id === delegation.workspaceId,
+  ) as Record<string, unknown> | undefined;
+  if (!workspace) return undefined;
+  const tab = Array.isArray(workspace.tabs)
+    ? workspace.tabs.find(
+      (candidate) =>
+        candidate
+        && typeof candidate === "object"
+        && !Array.isArray(candidate)
+        && (candidate as Record<string, unknown>).id === delegation.tabId,
+    ) as Record<string, unknown> | undefined
+    : undefined;
+  const pane = tab && Array.isArray(tab.panes)
+    ? tab.panes.find(
+      (candidate) =>
+        candidate
+        && typeof candidate === "object"
+        && !Array.isArray(candidate)
+        && (candidate as Record<string, unknown>).id === delegation.paneId,
+    ) as Record<string, unknown> | undefined
+    : undefined;
+  return typeof pane?.machineId === "string"
+    ? pane.machineId
+    : typeof workspace.machineId === "string"
+      ? workspace.machineId
+      : undefined;
+};
+
+/** v4 delegations gain explicit attention and machine snapshots for fleet prioritization. */
+export const migrateV4ToV5State = (record: Record<string, unknown>): Record<string, unknown> => ({
+  ...record,
+  schemaVersion: 5,
+  delegations: Array.isArray(record.delegations)
+    ? record.delegations.map((delegation) => {
+      if (!delegation || typeof delegation !== "object" || Array.isArray(delegation)) {
+        return delegation;
+      }
+      const delegationRecord = delegation as Record<string, unknown>;
+      const attentionReason = inferDelegationAttentionReason(delegationRecord);
+      const machineId = machineIdForDelegation(record, delegationRecord);
+      return {
+        ...delegationRecord,
+        ...(attentionReason ? { attentionReason } : {}),
+        ...(machineId ? { machineId } : {}),
+      };
+    })
+    : record.delegations,
+});
+
 export const parsePersistedState = (input: unknown): ParsedPersistedState => {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw new Error("state must be a JSON object");
@@ -281,19 +375,30 @@ export const parsePersistedState = (input: unknown): ParsedPersistedState => {
   if (typeof rawVersion === "number" && Number.isInteger(rawVersion) && rawVersion > CURRENT_STATE_SCHEMA_VERSION) {
     throw new UnsupportedStateVersionError(rawVersion);
   }
-  if (rawVersion !== undefined && rawVersion !== 0 && rawVersion !== 1 && rawVersion !== 2 && rawVersion !== 3 && rawVersion !== CURRENT_STATE_SCHEMA_VERSION) {
+  if (
+    rawVersion !== undefined
+    && rawVersion !== 0
+    && rawVersion !== 1
+    && rawVersion !== 2
+    && rawVersion !== 3
+    && rawVersion !== 4
+    && rawVersion !== CURRENT_STATE_SCHEMA_VERSION
+  ) {
     throw new Error("state schemaVersion must be a supported integer");
   }
   const migrated = rawVersion !== CURRENT_STATE_SCHEMA_VERSION;
-  const v2Candidate = rawVersion === 2 ? record : migratePreV2State(record);
-  const v3Candidate = rawVersion === 3
+  const v2Candidate = rawVersion !== undefined && rawVersion >= 2
     ? record
-    : rawVersion === CURRENT_STATE_SCHEMA_VERSION
-      ? record
-      : migrateV2ToV3State(v2Candidate);
-  const candidate = rawVersion === CURRENT_STATE_SCHEMA_VERSION
+    : migratePreV2State(record);
+  const v3Candidate = rawVersion !== undefined && rawVersion >= 3
+    ? record
+    : migrateV2ToV3State(v2Candidate);
+  const v4Candidate = rawVersion !== undefined && rawVersion >= 4
     ? record
     : migrateV3ToV4State(v3Candidate);
+  const candidate = rawVersion === CURRENT_STATE_SCHEMA_VERSION
+    ? record
+    : migrateV4ToV5State(v4Candidate);
   return { state: persistedStateSchema.parse(candidate), migrated };
 };
 

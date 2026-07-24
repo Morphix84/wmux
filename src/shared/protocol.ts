@@ -290,6 +290,12 @@ export type DelegationState =
   | "timed_out"
   | "interrupted";
 
+export type DelegationAttentionReason =
+  | "approval"
+  | "login"
+  | "blocked"
+  | "input";
+
 export type AgentTimelineEntryKind =
   | "prompt"
   | "status"
@@ -339,10 +345,12 @@ export interface DelegationRecord {
   summary: string;
   result: string;
   error: string;
+  attentionReason?: DelegationAttentionReason;
   observerError?: string;
   workspaceId: string;
   tabId: string;
   paneId: string;
+  machineId?: string;
   createdAt: string;
   updatedAt: string;
 }

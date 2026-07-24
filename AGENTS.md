@@ -81,6 +81,8 @@ Keep websocket, media, clipboard, hook, and run endpoints behind the same networ
   Every dispatched route must remain covered by the real-server route-policy guard.
 - `AgentSessionService` in `src/server/agent-sessions.ts` owns delegation transitions, exact-once terminal outcomes, notification/title side effects, persistence backfill, and retention.
   `AgentTimelineStore` owns session turns, prompts, lifecycle entries, and archived review links; mobile Chat must render this durable history without requiring a terminal attachment.
+  Delegations retain the pane-local machine ID so the fleet remains intelligible after workspace removal.
+  Approval, login, blocked, and input-required transitions are explicit attention reasons; keep their notifications exact-once and sort them above ordinary running work.
   Runtime-specific argv, structured output, and TUI marker behavior belong in the Codex, Claude, and OpenCode adapters under `src/server/agent-runtimes/`.
   Keep `delegation.preferHeadless` defaulting to `false`; interactive requests always use TUI adapters.
 - `SessionBackend` is the pane execution contract.
@@ -158,7 +160,7 @@ Keep websocket, media, clipboard, hook, and run endpoints behind the same networ
 
 ## Helpers And Integrations
 
-- Agent events are handled by `POST /api/agent-events`; this updates auto-owned workspace titles/descriptors and creates terminal notifications for completed/failed/stopped states.
+- Agent events are handled by `POST /api/agent-events`; this updates auto-owned workspace titles/descriptors and creates terminal notifications for attention and terminal transitions.
 - `wmux-title` updates generated or manual workspace/tab titles. Generated titles must not overwrite user-owned titles.
 - `wmux-notify` creates browser/terminal notifications through the wmux API.
 - Run metadata is handled by `POST /api/run-events`; `scripts/wmux-run` wraps a command and records start/completion state without changing terminal canvas output.

@@ -294,6 +294,7 @@ class WmuxClient:
         run_id: str = "",
         session_id: str = "",
         prompt: str = "",
+        attention_reason: str = "",
     ) -> None:
         body = {
             "workspaceId": workspace_id,
@@ -312,6 +313,8 @@ class WmuxClient:
             body["sessionId"] = session_id
         if prompt:
             body["prompt"] = prompt
+        if attention_reason:
+            body["attentionReason"] = attention_reason
         self.request(
             "POST",
             "/api/agent-events",
@@ -1825,11 +1828,17 @@ def cmd_delegate(client: WmuxClient, args: argparse.Namespace) -> int:
         if not detail:
             detail = "Delegated task completed without text output." if ok else f"Delegated task failed with exit code {exit_code}."
         status = "completed" if ok else "failed"
+        lifecycle_summary = (
+            f"{args.runtime.capitalize()} delegation blocked"
+            if outcome == "blocked"
+            else f"{args.runtime.capitalize()} delegation {status}"
+        )
         if not recovered:
             client.record_agent_event(
                 info["workspaceId"], info["tabId"], info["paneId"], args.runtime, status, title,
-                f"{args.runtime.capitalize()} delegation {status}", message=detail, run_id=run_id,
+                lifecycle_summary, message=detail, run_id=run_id,
                 session_id=session_id,
+                attention_reason="blocked" if outcome == "blocked" else "",
             )
         info.update({
             "runId": run_id,

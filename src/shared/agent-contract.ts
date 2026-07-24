@@ -101,6 +101,7 @@ export interface AgentEventPostBody {
   summary?: string;
   message?: string;
   prompt?: string;
+  attentionReason?: "approval" | "login" | "blocked" | "input";
   body?: string;
 }
 

@@ -28,6 +28,7 @@ export default defineConfig({
     env: {
       ...process.env,
       WMUX_DISABLE_AUTH: "1",
+      WMUX_REGISTRATION_TOKEN: "e2e-registration-token",
       WMUX_CONFIG_PATH: path.resolve("e2e", "fixtures", "wmux.config.json"),
       WMUX_STATE_PATH: path.join(runtimeDir, "state.json"),
       WMUX_SETTINGS_PATH: path.join(runtimeDir, "settings.json"),

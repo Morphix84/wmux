@@ -30,6 +30,7 @@ interface OpenTuiMobileChromeProps {
   navigationOpen: boolean;
   onToggleNavigation: () => void;
   onSurfaceModeChange: (mode: MobileSurfaceMode) => void;
+  onOpenFleet: () => void;
   onOpenActions: () => void;
 }
 
@@ -118,6 +119,13 @@ export function OpenTuiMobileChrome(props: OpenTuiMobileChromeProps) {
       <div className="open-tui-mobile-chrome-actions">
         <button
           type="button"
+          aria-label="Open agent fleet"
+          onClick={props.onOpenFleet}
+        >
+          Fleet
+        </button>
+        <button
+          type="button"
           aria-label={props.navigationOpen ? "Hide workspaces and hosts" : "Open workspaces and hosts"}
           aria-expanded={props.navigationOpen}
           aria-controls="wmux-sidebar"
@@ -203,10 +211,12 @@ const drawMobileChrome = (
   }
 
   const gap = 1;
-  const available = Math.max(4, cols - gap * 5);
-  const widths = [0, 1, 2, 3].map((index) => Math.floor((available + index) / 4));
+  const available = Math.max(5, cols - gap * 6);
+  const widths = [0, 1, 2, 3, 4].map((index) =>
+    Math.floor((available + index) / 5));
   const labels = [
     model.navigationOpen ? "NAV*" : "NAV",
+    "FLEET",
     model.surfaceMode === "agent" ? "CHAT*" : "CHAT",
     model.surfaceMode === "terminal" ? "TERM*" : "TERM",
     "CMD",

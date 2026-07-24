@@ -222,6 +222,36 @@ test("version 3 delegation runs migrate into durable agent sessions", () => {
   });
 });
 
+test("version 4 delegations migrate explicit fleet attention reasons", () => {
+  withTempState((filePath) => {
+    const store = new StateStore(machines, filePath);
+    const paneId = store.snapshot().workspaces[0].tabs[0].panes[0].id;
+    agentsFor(store).recordAgentEvent({
+      paneId,
+      runId: "run-version-4",
+      agent: "codex",
+      status: "waiting",
+      summary: "Please sign in to continue",
+    });
+    const previous = store.snapshot() as unknown as Record<string, unknown>;
+    previous.schemaVersion = 4;
+    const delegations = previous.delegations as Array<Record<string, unknown>>;
+    delete delegations[0].attentionReason;
+    fs.writeFileSync(filePath, JSON.stringify(previous));
+
+    const migrated = new StateStore(machines, filePath);
+    assert.equal(
+      agentsFor(migrated).delegationForRun("run-version-4")?.attentionReason,
+      "login",
+    );
+    assert.equal(
+      agentsFor(migrated).delegationForRun("run-version-4")?.machineId,
+      "local",
+    );
+    assert.equal(migrated.snapshot().schemaVersion, CURRENT_STATE_SCHEMA_VERSION);
+  });
+});
+
 test("state recovers from the last validated backup", () => {
   withTempState((filePath, dir) => {
     const store = new StateStore(machines, filePath);
