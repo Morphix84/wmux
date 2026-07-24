@@ -1,4 +1,5 @@
 import type http from "node:http";
+import type { AgentFollowUpService } from "../agent-follow-up.js";
 import type { AgentSessionService } from "../agent-sessions.js";
 import type { AuthConfig, AuthPrincipal } from "../auth.js";
 import type { HostRegistry } from "../host-registry.js";
@@ -39,6 +40,7 @@ export class HttpError extends Error {
 export interface ServerDeps {
   bindHost: string;
   auth: AuthConfig;
+  agentFollowUps: AgentFollowUpService;
   agentSessions: AgentSessionService;
   trustedProxies: ReadonlySet<string>;
   loginAttempts: LoginAttemptThrottle;

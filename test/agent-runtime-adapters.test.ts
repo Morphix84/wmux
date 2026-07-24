@@ -57,6 +57,31 @@ test("runtime adapters keep prompts out of process arguments", () => {
   }
 });
 
+test("Claude unattended approval never grants write access by itself", () => {
+  const readOnly = claudeHeadlessAdapter.buildLaunch({
+    ...request,
+    runtime: "claude",
+    writeAccess: false,
+    unattended: true,
+    sandboxMode: "read-only",
+  });
+  assert.deepEqual(
+    readOnly.args.slice(
+      readOnly.args.indexOf("--permission-mode"),
+      readOnly.args.indexOf("--permission-mode") + 2,
+    ),
+    ["--permission-mode", "plan"],
+  );
+
+  const writable = claudeHeadlessAdapter.buildLaunch({
+    ...request,
+    runtime: "claude",
+    writeAccess: true,
+    unattended: true,
+  });
+  assert.ok(writable.args.includes("bypassPermissions"));
+});
+
 test("headless adapters parse recorded structured output", () => {
   const codex = codexHeadlessAdapter.classifyOutput(
     '{"type":"item.completed","item":{"type":"agent_message","text":"Codex done"}}\n',

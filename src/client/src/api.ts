@@ -1,6 +1,15 @@
 import { authHeaders } from "./token";
 import type { ClientSplitIds, ClientTabIds, ClientWorkspaceIds } from "./optimistic-creation";
-import type { BootstrapPayload, DoctorReport, DurableSessionAudit, SplitDirection, WorkspaceReorderPosition, WmuxSettings } from "./types";
+import type {
+  AgentFollowUpRequest,
+  AgentFollowUpResult,
+  BootstrapPayload,
+  DoctorReport,
+  DurableSessionAudit,
+  SplitDirection,
+  WorkspaceReorderPosition,
+  WmuxSettings,
+} from "./types";
 
 export type ModalSettingsUpdate = Omit<WmuxSettings, "collapsedWorkspaceIds">;
 
@@ -210,6 +219,17 @@ export const api = {
         ...(timelinePrompt ? { timelinePrompt } : {}),
       }),
     }),
+  createAgentFollowUp: (
+    sessionId: string,
+    request: AgentFollowUpRequest,
+  ) =>
+    json<AgentFollowUpResult & { state: BootstrapPayload }>(
+      `/api/agent-sessions/${encodeURIComponent(sessionId)}/turns`,
+      {
+        method: "POST",
+        body: JSON.stringify(request),
+      },
+    ),
   uploadPaneAttachment: (paneId: string, attachment: { name: string; mimeType: string; data: string }) =>
     json<{ attachment: PaneAttachment }>(`/api/panes/${encodeURIComponent(paneId)}/attachments`, {
       method: "POST",

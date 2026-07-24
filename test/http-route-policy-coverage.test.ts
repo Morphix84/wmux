@@ -27,6 +27,7 @@ const documentedRoutes = [
   ["pane-input", "POST", "/api/panes/pane/input"],
   ["agent-event", "POST", "/api/agent-events"],
   ["agent-session-timeline", "GET", "/api/agent-sessions/session"],
+  ["agent-session-follow-up", "POST", "/api/agent-sessions/session/turns"],
   ["repository-snapshot-read", "GET", "/api/repository-snapshots/snapshot"],
   ["run-event", "POST", "/api/run-events"],
   ["stream-request", "POST", "/api/streams/linux-box/request"],

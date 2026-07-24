@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import type { PaneAttachment } from "./api";
 import type {
+  AgentFollowUpRequest,
   AgentActivity,
   AgentSessionTimeline,
   AgentTimelineEntry,
@@ -43,6 +44,10 @@ interface MobileAgentSurfaceProps {
     timelinePrompt?: string,
   ) => Promise<void>;
   onUploadAttachment: (paneId: string, attachment: PaneAttachmentUpload) => Promise<PaneAttachment>;
+  onFollowUp: (
+    sessionId: string,
+    request: AgentFollowUpRequest,
+  ) => Promise<void>;
   onFocusTerminal?: () => void;
   onOpenActions?: () => void;
 }
@@ -127,6 +132,7 @@ export function MobileAgentSurface({
   pane,
   onSendInput,
   onUploadAttachment,
+  onFollowUp,
   onFocusTerminal,
   onOpenActions,
 }: MobileAgentSurfaceProps) {
@@ -136,6 +142,8 @@ export function MobileAgentSurface({
   const [sendError, setSendError] = useState("");
   const [sendNotice, setSendNotice] = useState("");
   const [launchingAgent, setLaunchingAgent] = useState<AgentLauncher | null>(null);
+  const [followUpWriteAccess, setFollowUpWriteAccess] = useState(false);
+  const [followUpUnattended, setFollowUpUnattended] = useState(false);
   const [trustedAgentLaunch, setTrustedAgentLaunch] = useState<{ paneId: string; agent: AgentLauncher; createdAt: number } | null>(null);
   const [localMessages, setLocalMessages] = useState<LocalMobileMessage[]>(loadLocalMobileMessages);
   const [threadAtBottom, setThreadAtBottom] = useState(true);
@@ -155,6 +163,17 @@ export function MobileAgentSurface({
       .sort((first, second) => Date.parse(second.createdAt) - Date.parse(first.createdAt))[0];
   }, [pane, state.agentEvents]);
   const latestAgent = latestPaneAgent;
+  const latestPaneDelegation = useMemo(
+    () => pane
+      ? state.delegations.find((delegation) => delegation.paneId === pane.id)
+      : undefined,
+    [pane, state.delegations],
+  );
+  const followUpSession = latestPaneDelegation
+    && isSettledAgentStatus(latestPaneDelegation.state)
+    && ["codex", "claude"].includes(latestPaneDelegation.runtime)
+      ? latestPaneDelegation
+      : undefined;
   const localAgentLaunch =
     pane && trustedAgentLaunch?.paneId === pane.id && Date.now() - trustedAgentLaunch.createdAt < 12 * 60 * 60 * 1000
       ? trustedAgentLaunch.agent
@@ -279,6 +298,8 @@ export function MobileAgentSurface({
     });
     setSendError("");
     setSendNotice("");
+    setFollowUpWriteAccess(false);
+    setFollowUpUnattended(false);
   }, [pane?.id]);
 
   const appendPastedImages = (files: File[]) => {
@@ -335,6 +356,11 @@ export function MobileAgentSurface({
       setSendNotice("");
       return;
     }
+    if (followUpSession && imagesToSend.length > 0) {
+      setSendError("Headless follow-up turns do not support image attachments.");
+      setSendNotice("");
+      return;
+    }
     setSending(true);
     setSendError("");
     setSendNotice("");
@@ -378,12 +404,24 @@ export function MobileAgentSurface({
       setDraft("");
       setPendingImages([]);
       const formattedInput = formatComposerTextInput(text, sentAttachments);
-      await sendMobileComposerInput(
-        onSendInput,
-        pane.id,
-        formattedInput,
-        formattedInput.replace(/^\x1b\[200~/, "").replace(/\x1b\[201~$/, ""),
-      );
+      const timelinePrompt = formattedInput
+        .replace(/^\x1b\[200~/, "")
+        .replace(/\x1b\[201~$/, "");
+      if (followUpSession) {
+        await onFollowUp(followUpSession.sessionId, {
+          action: "continue",
+          prompt: timelinePrompt,
+          writeAccess: followUpWriteAccess,
+          unattended: followUpUnattended,
+        });
+      } else {
+        await sendMobileComposerInput(
+          onSendInput,
+          pane.id,
+          formattedInput,
+          timelinePrompt,
+        );
+      }
       setLocalMessages((current) =>
         current.filter((message) => message.id !== localMessageId),
       );
@@ -396,6 +434,21 @@ export function MobileAgentSurface({
         }
       }
       setSendError(error instanceof Error ? error.message : "Send failed");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const reviewChanges = async () => {
+    if (!followUpSession || sending) return;
+    setSending(true);
+    setSendError("");
+    setSendNotice("");
+    try {
+      await onFollowUp(followUpSession.sessionId, { action: "review" });
+      setSendNotice("Read-only review completed.");
+    } catch (error) {
+      setSendError(error instanceof Error ? error.message : "Review failed");
     } finally {
       setSending(false);
     }
@@ -522,6 +575,37 @@ export function MobileAgentSurface({
         <span className="mobile-agent-composer-handle" aria-hidden="true" />
         {sendError ? <div className="mobile-agent-error">{sendError}</div> : null}
         {sendNotice ? <div className="mobile-agent-notice">{sendNotice}</div> : null}
+        {followUpSession ? (
+          <div className="mobile-agent-follow-up">
+            <div>
+              <strong>Headless follow-up</strong>
+              <span>Same durable {followUpSession.runtime} session</span>
+            </div>
+            <button
+              type="button"
+              disabled={sending}
+              onClick={() => void reviewChanges()}
+            >
+              Review changes
+            </button>
+            <label>
+              <input
+                type="checkbox"
+                checked={followUpWriteAccess}
+                onChange={(event) => setFollowUpWriteAccess(event.target.checked)}
+              />
+              Write access
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={followUpUnattended}
+                onChange={(event) => setFollowUpUnattended(event.target.checked)}
+              />
+              Unattended
+            </label>
+          </div>
+        ) : null}
         {pendingImages.length ? (
           <div className="mobile-agent-attachments" aria-label="Images to send">
             {pendingImages.map((attachment) => (
@@ -548,7 +632,11 @@ export function MobileAgentSurface({
             ref={composerRef}
             value={draft}
             aria-label="Agent message"
-            placeholder={pane ? `Message ${agentSession.agent ?? "agent"} or paste images` : "No active session"}
+            placeholder={pane
+              ? followUpSession
+                ? `Continue ${followUpSession.runtime} session`
+                : `Message ${agentSession.agent ?? "agent"} or paste images`
+              : "No active session"}
             disabled={!pane}
             rows={1}
             autoComplete="off"

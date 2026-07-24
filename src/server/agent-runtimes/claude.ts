@@ -34,7 +34,7 @@ export const claudeHeadlessAdapter: AgentRuntimeAdapter = {
       "--output-format",
       "stream-json",
       "--permission-mode",
-      request.unattended
+      request.unattended && request.writeAccess
         ? "bypassPermissions"
         : request.writeAccess
           ? "acceptEdits"

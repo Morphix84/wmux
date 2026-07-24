@@ -380,13 +380,19 @@ wmux is not a hardened multi-user service.
 The server resolves the pane, local machine, current directory, and repository root from canonical server state.
 The client cannot select a host, path, executable, shell command, or Git argument.
 
-The response contains a memory-only content revision, HEAD revision when one exists, repository-relative file summaries, staged and unstaged tracked patches, and synthesized patches for bounded UTF-8 untracked files.
+The response contains a content revision, HEAD revision when one exists, repository-relative file summaries, staged and unstaged tracked patches, and synthesized patches for bounded UTF-8 untracked files.
 File summaries preserve rename, deletion, mode, binary, and submodule metadata while replacing unsafe or undecodable paths with stable non-reversible labels.
 Ignored files are excluded.
 Explicit response metadata reports file, patch-byte, hunk, line, long-line, per-file and aggregate untracked-content, Git-output, timeout, and consistency limits so a partial snapshot is never presented as complete.
 
-This first boundary is read-only and local-only.
-It has no browser review UI, remote adapter, persisted review state, Git mutation, fetch, credential operation, or Hunk/OpenTUI runtime.
+Snapshot capture is read-only and local-only.
+When an agent session is active for the pane, the snapshot is archived in the versioned owner-only timeline store and linked from the mobile Chat history.
+Completed Codex and Claude sessions expose a read-only review action and a continue action through `POST /api/agent-sessions/:sessionId/turns`.
+The server resolves the exact local repository root from the pane, supplies bounded durable session context to a headless runtime adapter, and keeps prompts out of process arguments.
+Review always uses a read-only runtime mode and rejects write or unattended grants.
+Continue treats write access and unattended approval as independent explicit grants.
+OpenCode follow-up is disabled because its current headless CLI adapter cannot enforce the read-only boundary.
+Remote repositories, native runtime resume identifiers, interactive headless approvals, Git fetches, credential operations, and Hunk/OpenTUI review remain deferred.
 Automation, helper, registration, and registered-host credentials cannot access the route.
 
 ## Workspaces and Interaction
@@ -548,6 +554,9 @@ Delegated agent hooks associate each prompt and final response with the controll
 wmux maintains a dedicated delegation ledger separately from workspace activity, so an outcome remains queryable after its pane or workspace closes.
 Each session also has a durable turn timeline containing its prompts, state changes, outcomes, and links to working-tree snapshots captured through the repository review API.
 Query `GET /api/agent-sessions/:sessionId` for that history.
+Post `{"action":"review"}` to `POST /api/agent-sessions/:sessionId/turns` for a read-only local working-tree review.
+Post `{"action":"continue","prompt":"...","writeAccess":false,"unattended":false}` to start a new headless turn with bounded context from the same durable session.
+Write access and unattended approval default false and are never inferred from one another.
 The mobile Chat surface renders matching sessions directly from this timeline, so it can restore complete conversation history without attaching the terminal pane.
 The Agent Fleet surface is available from the command palette and mobile header.
 It orders approval, login, blocked, and input-required sessions first, then shows every active or actionable delegation's runtime, retained host identity, state age, and latest durable timeline entry.
