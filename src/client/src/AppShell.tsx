@@ -3,6 +3,7 @@ import { Activity, Bell, BellRing, CheckCheck, ChevronDown, ChevronRight, Circle
 import { api, modalSettingsUpdate, UnauthorizedError, WorkspaceReorderConflictError } from "./api";
 import { DiagnosticsModal } from "./DiagnosticsModal";
 import { ActivityPanel, buildActivityItems } from "./ActivityPanel";
+import { AgentFleet, type AgentFleetRow } from "./AgentFleet";
 import { CommandPalette, type PaletteCommand } from "./CommandPalette";
 import { SettingsModal, cleanAlias, defaultSettings, type SettingsSurface } from "./SettingsModal";
 import { ColorSchemeProvider } from "./color-scheme-context";
@@ -138,6 +139,7 @@ export function AppShell() {
   const [workspaceDropPreview, setWorkspaceDropPreview] = useState<WorkspaceDropPreview | null>(null);
   const [moveWorkspace, setMoveWorkspace] = useState<{ workspaceId: string; returnFocus: HTMLElement | null } | null>(null);
   const [activityOpen, setActivityOpen] = useState(false);
+  const [agentFleetOpen, setAgentFleetOpen] = useState(false);
   const [streamOpen, setStreamOpen] = useState(false);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [doctorReport, setDoctorReport] = useState<DoctorReport | null>(null);
@@ -1005,7 +1007,7 @@ export function AppShell() {
   useKeyboardShortcuts({
     keybindings,
     apple: appleKeybindings,
-    modalOpen: settingsOpen || commandPaletteOpen || diagnosticsOpen,
+    modalOpen: settingsOpen || commandPaletteOpen || diagnosticsOpen || agentFleetOpen,
     openCommandPalette,
     openSettings,
     toggleSidebar,
@@ -1097,6 +1099,14 @@ export function AppShell() {
         section: "System",
         run: openDiagnostics,
         keywords: ["doctor", "health", "driver", "restart", "reconnect"],
+      },
+      {
+        id: "open-agent-fleet",
+        title: "Open agent fleet",
+        subtitle: "Runtime, host, state, elapsed time, and latest agent turn",
+        section: "View",
+        run: () => setAgentFleetOpen(true),
+        keywords: ["agents", "delegations", "waiting", "blocked", "control plane"],
       },
       {
         id: "open-activity",
@@ -1836,6 +1846,7 @@ export function AppShell() {
             navigationOpen={!sidebarCollapsed}
             onToggleNavigation={toggleSidebar}
             onSurfaceModeChange={setMobileSurfaceMode}
+            onOpenFleet={() => setAgentFleetOpen(true)}
             onOpenActions={openCommandPalette}
           />
         ) : null}
@@ -1893,6 +1904,14 @@ export function AppShell() {
               <span>Workspaces</span>
             </button>
             <div className="mobile-mode-tabs" role="tablist" aria-label="Mobile surface">
+              <button
+                type="button"
+                aria-label="Open agent fleet"
+                onClick={() => setAgentFleetOpen(true)}
+              >
+                <Activity size={15} />
+                <span>Fleet</span>
+              </button>
               <button
                 type="button"
                 className={mobileSurfaceMode === "agent" ? "active" : ""}
@@ -2119,6 +2138,18 @@ export function AppShell() {
           error={doctorError}
           onRefresh={() => void refreshDiagnostics()}
           onClose={() => setDiagnosticsOpen(false)}
+        />
+      ) : null}
+      {agentFleetOpen ? (
+        <AgentFleet
+          state={state}
+          machines={displayMachines}
+          onClose={() => setAgentFleetOpen(false)}
+          onOpenSession={(row: AgentFleetRow) => {
+            setAgentFleetOpen(false);
+            activateWorkspaceTab(row.workspaceId, row.tabId);
+            void activatePaneInTab(row.tabId, row.paneId);
+          }}
         />
       ) : null}
       {settingsOpen ? (

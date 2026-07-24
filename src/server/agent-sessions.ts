@@ -8,6 +8,7 @@ import type {
   AgentActivity,
   AgentSessionTimeline,
   AgentTimelineSnapshotLink,
+  DelegationAttentionReason,
   DelegationRecord,
   DelegationState,
   PersistedState,
@@ -82,6 +83,7 @@ interface PaneContext {
 interface DelegationEventDisposition {
   accepted: boolean;
   terminalTransition: boolean;
+  attentionTransition: boolean;
 }
 
 export interface AgentEventResult {
@@ -110,6 +112,11 @@ export class AgentSessionService {
       const summary = cleanDescriptor(input.summary ?? input.body ?? "", "");
       const delegationMessage = cleanDelegationMessage(input.message ?? "");
       const message = cleanAgentMessage(delegationMessage);
+      const attentionReason = attentionReasonForEvent(
+        status,
+        [summary, delegationMessage, title].filter(Boolean).join(" "),
+        input.attentionReason,
+      );
       const suppliedRunId = cleanDelegationRunId(input.runId);
       const latestAgentEvent = persisted.agentEvents.find(
         (candidate) =>
@@ -184,8 +191,13 @@ export class AgentSessionService {
           agentEvent,
           delegationMessage,
           sessionId,
+          attentionReason,
         )
-        : { accepted: true, terminalTransition: false };
+        : {
+            accepted: true,
+            terminalTransition: false,
+            attentionTransition: Boolean(attentionReason),
+          };
       if (delegationDisposition.accepted) {
         persisted.agentEvents.unshift(agentEvent);
         persisted.agentEvents = persisted.agentEvents.slice(0, 300);
@@ -217,13 +229,19 @@ export class AgentSessionService {
       const terminalNotificationStatus = [
         "completed",
         "failed",
+        "blocked",
         "error",
         "cancelled",
         "stopped",
       ].includes(status);
       if (
-        terminalNotificationStatus
-        && (!runId || delegationDisposition.terminalTransition)
+        (
+          (
+            terminalNotificationStatus
+            && (!runId || delegationDisposition.terminalTransition)
+          )
+          || delegationDisposition.attentionTransition
+        )
       ) {
         notification = {
           id: createId("note"),
@@ -231,8 +249,10 @@ export class AgentSessionService {
           tabId: target.tab.id,
           paneId: target.paneId,
           title: agent,
-          subtitle: status,
-          body: summary || title || `${agent} ${status}`,
+          subtitle: attentionReason
+            ? attentionReasonLabel(attentionReason)
+            : status,
+          body: delegationMessage || summary || title || `${agent} ${status}`,
           createdAt,
           read: false,
         };
@@ -574,8 +594,15 @@ const recordDelegationEvent = (
   event: AgentActivity,
   message: string,
   sessionId: string,
+  attentionReason?: DelegationAttentionReason,
 ): DelegationEventDisposition => {
-  if (!event.runId) return { accepted: true, terminalTransition: false };
+  if (!event.runId) {
+    return {
+      accepted: true,
+      terminalTransition: false,
+      attentionTransition: Boolean(attentionReason),
+    };
+  }
   const existing = state.delegations.find(
     (candidate) => candidate.runId === event.runId,
   );
@@ -584,6 +611,7 @@ const recordDelegationEvent = (
       existing && TERMINAL_DELEGATION_STATES.has(existing.state),
     );
     const observerError = message || event.summary;
+    const machineId = targetMachineId(state, event);
     if (existing) {
       existing.observerError = observerError;
       existing.updatedAt = event.createdAt;
@@ -602,12 +630,17 @@ const recordDelegationEvent = (
         workspaceId: event.workspaceId,
         tabId: event.tabId,
         paneId: event.paneId,
+        ...(machineId ? { machineId } : {}),
         createdAt: event.createdAt,
         updatedAt: event.createdAt,
       });
     }
     pruneDelegations(state);
-    return { accepted: !terminalExisting, terminalTransition: false };
+    return {
+      accepted: !terminalExisting,
+      terminalTransition: false,
+      attentionTransition: false,
+    };
   }
 
   const reportedState = delegationStateForStatus(event.status);
@@ -617,16 +650,31 @@ const recordDelegationEvent = (
     && !DELEGATION_TRANSITIONS[existing.state].includes(reportedState)
   ) {
     pruneDelegations(state);
-    return { accepted: false, terminalTransition: false };
+    return {
+      accepted: false,
+      terminalTransition: false,
+      attentionTransition: false,
+    };
   }
   if (existing && TERMINAL_DELEGATION_STATES.has(existing.state)) {
     pruneDelegations(state);
-    return { accepted: false, terminalTransition: false };
+    return {
+      accepted: false,
+      terminalTransition: false,
+      attentionTransition: false,
+    };
   }
   const nextState = reportedState ?? existing?.state ?? "running";
   const successful = nextState === "completed";
   const terminal = TERMINAL_DELEGATION_STATES.has(nextState);
   const detail = message || event.summary;
+  const previousAttentionReason = existing?.attentionReason;
+  const machineId = targetMachineId(state, event);
+  const nextAttentionReason = nextState === "waiting"
+    ? attentionReason ?? "input"
+    : attentionReason === "blocked"
+      ? attentionReason
+      : undefined;
   const delegation: DelegationRecord = existing ?? {
     runId: event.runId,
     sessionId,
@@ -639,6 +687,7 @@ const recordDelegationEvent = (
     workspaceId: event.workspaceId,
     tabId: event.tabId,
     paneId: event.paneId,
+    ...(machineId ? { machineId } : {}),
     createdAt: event.createdAt,
     updatedAt: event.createdAt,
   };
@@ -650,7 +699,10 @@ const recordDelegationEvent = (
   delegation.workspaceId = event.workspaceId;
   delegation.tabId = event.tabId;
   delegation.paneId = event.paneId;
+  delegation.machineId = machineId ?? delegation.machineId;
   delegation.updatedAt = event.createdAt;
+  if (nextAttentionReason) delegation.attentionReason = nextAttentionReason;
+  else delete delegation.attentionReason;
   if (terminal) {
     delegation.result = successful ? detail : "";
     delegation.error = successful ? "" : detail;
@@ -658,7 +710,29 @@ const recordDelegationEvent = (
   if (!existing) state.delegations.unshift(delegation);
   else moveDelegationToFront(state, delegation.runId);
   pruneDelegations(state);
-  return { accepted: true, terminalTransition: terminal };
+  return {
+    accepted: true,
+    terminalTransition: terminal,
+    attentionTransition: Boolean(
+      nextAttentionReason
+      && nextAttentionReason !== previousAttentionReason
+    ),
+  };
+};
+
+const targetMachineId = (
+  state: PersistedState,
+  event: Pick<AgentActivity, "workspaceId" | "tabId" | "paneId">,
+): string | undefined => {
+  const workspace = state.workspaces.find(
+    (candidate) => candidate.id === event.workspaceId,
+  );
+  const tab = workspace?.tabs.find(
+    (candidate) => candidate.id === event.tabId,
+  );
+  return tab?.panes.find(
+    (candidate) => candidate.id === event.paneId,
+  )?.machineId ?? workspace?.machineId;
 };
 
 const moveDelegationToFront = (
@@ -745,11 +819,55 @@ const cleanTimelineId = (value?: string): string => {
     : "";
 };
 
+const attentionReasonForEvent = (
+  status: string,
+  detail: string,
+  supplied?: string,
+): DelegationAttentionReason | undefined => {
+  if (
+    supplied === "approval"
+    || supplied === "login"
+    || supplied === "blocked"
+    || supplied === "input"
+  ) {
+    return supplied;
+  }
+  const normalized = detail.toLowerCase();
+  if (
+    status === "blocked"
+    || /["']outcome["']\s*:\s*["']blocked["']/.test(normalized)
+    || (
+      ["failed", "error"].includes(status)
+      && /\b(blocked|cannot proceed|unable to proceed)\b/.test(normalized)
+    )
+  ) {
+    return "blocked";
+  }
+  if (status !== "waiting") return undefined;
+  if (/\b(login|log in|sign in|authenticate|authentication)\b/.test(normalized)) {
+    return "login";
+  }
+  if (/\b(approval|approve|permission|confirm)\b/.test(normalized)) {
+    return "approval";
+  }
+  return "input";
+};
+
+const attentionReasonLabel = (
+  reason: DelegationAttentionReason,
+): string => ({
+  approval: "approval required",
+  login: "login required",
+  blocked: "blocked",
+  input: "input required",
+})[reason];
+
 const delegationStateForStatus = (
   status: string,
 ): DelegationState | null => {
   if (status === "waiting") return "waiting";
   if (status === "completed") return "completed";
+  if (status === "blocked") return "failed";
   if (
     [
       "failed",

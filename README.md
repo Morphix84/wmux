@@ -545,6 +545,8 @@ wmux maintains a dedicated delegation ledger separately from workspace activity,
 Each session also has a durable turn timeline containing its prompts, state changes, outcomes, and links to working-tree snapshots captured through the repository review API.
 Query `GET /api/agent-sessions/:sessionId` for that history.
 The mobile Chat surface renders matching sessions directly from this timeline, so it can restore complete conversation history without attaching the terminal pane.
+The Agent Fleet surface is available from the command palette and mobile header.
+It orders approval, login, blocked, and input-required sessions first, then shows every active or actionable delegation's runtime, retained host identity, state age, and latest durable timeline entry.
 `wmuxctl` races terminal replay against the authenticated delegation-status endpoint, allowing either completion signal to finish the request without waiting for the other to time out.
 Controller observation failures are recorded separately and never replace an agent's terminal outcome.
 `--mode review`, `--mode change`, and `--mode deploy` select the configured wait profile.

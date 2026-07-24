@@ -103,3 +103,67 @@ test("a terminal delegation rejects late and duplicate outcomes", () => {
     assert.equal(state.snapshot().notifications.length, 1);
   });
 });
+
+test("attention transitions are explicit, prioritized, and notified once", () => {
+  withAgentSessions((state, agents) => {
+    const paneId = state.snapshot().workspaces[0].tabs[0].panes[0].id;
+    agents.recordAgentEvent({
+      paneId,
+      runId: "run-attention",
+      agent: "codex",
+      status: "running",
+      summary: "Working",
+    });
+    const waiting = agents.recordAgentEvent({
+      paneId,
+      runId: "run-attention",
+      agent: "codex",
+      status: "waiting",
+      summary: "Approve the repository change",
+      attentionReason: "approval",
+    });
+    assert.equal(waiting.notification?.subtitle, "approval required");
+    assert.equal(
+      agents.delegationForRun("run-attention")?.attentionReason,
+      "approval",
+    );
+
+    agents.recordAgentEvent({
+      paneId,
+      runId: "run-attention",
+      agent: "codex",
+      status: "waiting",
+      summary: "Still waiting for approval",
+      attentionReason: "approval",
+    });
+    assert.equal(state.snapshot().notifications.length, 1);
+
+    agents.recordAgentEvent({
+      paneId,
+      runId: "run-attention",
+      agent: "codex",
+      status: "running",
+      summary: "Resumed",
+    });
+    assert.equal(
+      agents.delegationForRun("run-attention")?.attentionReason,
+      undefined,
+    );
+
+    const blocked = agents.recordAgentEvent({
+      paneId,
+      runId: "run-blocked",
+      agent: "codex",
+      status: "failed",
+      summary: "Delegation blocked",
+      attentionReason: "blocked",
+      message: "Remote dependency is unavailable",
+    });
+    assert.equal(blocked.notification?.subtitle, "blocked");
+    assert.equal(
+      agents.delegationForRun("run-blocked")?.attentionReason,
+      "blocked",
+    );
+    assert.equal(state.snapshot().notifications.length, 2);
+  });
+});
