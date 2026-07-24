@@ -1,0 +1,116 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+import {
+  BrowserSessionStore,
+  UnsupportedBrowserSessionVersionError,
+} from "../src/server/browser-session-store.js";
+
+test("browser sessions persist owner-only digests and survive restart", () => {
+  const directory = fs.mkdtempSync(
+    path.join(os.tmpdir(), "wmux-browser-sessions-"),
+  );
+  const filePath = path.join(directory, "browser-sessions.json");
+  try {
+    const nowMs = Date.now();
+    const issued = new BrowserSessionStore("session-secret", filePath)
+      .issue(60_000, nowMs);
+    const contents = fs.readFileSync(filePath, "utf8");
+    assert.doesNotMatch(contents, new RegExp(issued.token));
+    assert.equal(fs.statSync(directory).mode & 0o777, 0o700);
+    assert.equal(fs.statSync(filePath).mode & 0o777, 0o600);
+
+    const restored = new BrowserSessionStore(
+      "session-secret",
+      filePath,
+    ).authenticate(issued.token, nowMs + 30_000);
+    assert.equal(restored?.id, issued.id);
+    assert.equal(restored?.expiresAt, issued.expiresAt);
+    assert.equal(
+      new BrowserSessionStore(
+        "different-secret",
+        filePath,
+      ).authenticate(issued.token, nowMs + 30_000),
+      undefined,
+    );
+    assert.equal(
+      new BrowserSessionStore(
+        "session-secret",
+        filePath,
+      ).authenticate(issued.token, nowMs + 120_000),
+      undefined,
+    );
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("browser session files recover from backup and refuse downgrade", () => {
+  const directory = fs.mkdtempSync(
+    path.join(os.tmpdir(), "wmux-browser-session-recovery-"),
+  );
+  const filePath = path.join(directory, "browser-sessions.json");
+  try {
+    const store = new BrowserSessionStore("session-secret", filePath);
+    const first = store.issue(60_000);
+    store.issue(60_000);
+    fs.writeFileSync(filePath, "{corrupt");
+    assert.equal(
+      new BrowserSessionStore(
+        "session-secret",
+        filePath,
+      ).authenticate(first.token)?.id,
+      first.id,
+    );
+    assert.equal(
+      fs.readdirSync(directory).some((entry) =>
+        entry.includes(".corrupt-")),
+      true,
+    );
+
+    const future = JSON.stringify({
+      schemaVersion: 2,
+      sessions: [],
+    });
+    fs.writeFileSync(filePath, future, { mode: 0o600 });
+    fs.chmodSync(filePath, 0o600);
+    assert.throws(
+      () => new BrowserSessionStore("session-secret", filePath),
+      UnsupportedBrowserSessionVersionError,
+    );
+    assert.equal(fs.readFileSync(filePath, "utf8"), future);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("browser session storage rejects unsafe parents and record files", () => {
+  const directory = fs.mkdtempSync(
+    path.join(os.tmpdir(), "wmux-browser-session-safety-"),
+  );
+  try {
+    const unsafeParent = path.join(directory, "shared");
+    fs.mkdirSync(unsafeParent, { mode: 0o755 });
+    assert.throws(
+      () => new BrowserSessionStore(
+        "session-secret",
+        path.join(unsafeParent, "sessions.json"),
+      ).issue(60_000),
+      /parent directory must be owner-only/,
+    );
+
+    const safeParent = path.join(directory, "private");
+    fs.mkdirSync(safeParent, { mode: 0o700 });
+    const filePath = path.join(safeParent, "sessions.json");
+    new BrowserSessionStore("session-secret", filePath).issue(60_000);
+    fs.chmodSync(filePath, 0o644);
+    assert.throws(
+      () => new BrowserSessionStore("session-secret", filePath),
+      /permissions must be 0600/,
+    );
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});

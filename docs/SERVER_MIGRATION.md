@@ -19,10 +19,10 @@ Confirm browser login and pane durability, then set `login-only` and restart.
 Roll back by setting `shared-or-login` (or removing the variable), restarting, and verifying the retained legacy token.
 Keep legacy material through acceptance; this documents a procedure, not a claim about any live deployment.
 
-Do not casually copy `~/.wmux/token`, `registration-token`, `auth.json`, or
-`session-secret`. Copying them preserves broad credentials; omitting them lets
-the new service create an independent trust boundary. If a credential appears
-in terminal or diagnostic output, rotate it before continuing.
+Do not casually copy `~/.wmux/token`, `registration-token`, `auth.json`, `session-secret`, or `browser-sessions.json`.
+Copying browser session records together with their secret preserves active login-only sessions.
+Omitting them lets the new service create an independent trust boundary.
+If a credential appears in terminal or diagnostic output, rotate it before continuing.
 
 ## Rebase the local machine
 

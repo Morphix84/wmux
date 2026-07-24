@@ -1,9 +1,10 @@
-// Shared access token handling for the browser client.
+// Compatibility-mode shared and stateless session token handling.
 //
 // The token arrives once via `?token=…` (from the URL the server logs on
 // startup). We persist it to localStorage, strip it from the address bar so it
 // doesn't linger in history/screenshots, and attach it to every API call and
-// WebSocket connection thereafter.
+// WebSocket connection thereafter. Login-only mode clears this storage and
+// uses a server-backed HttpOnly cookie instead.
 
 const STORAGE_KEY = "wmux.token";
 
@@ -27,12 +28,6 @@ export const initToken = (): void => {
 };
 
 export const getToken = (): string => cachedToken;
-
-export const isBrowserSessionToken = (token: string): boolean => token.startsWith("wsess.");
-
-export const clearNonSessionToken = (): void => {
-  if (!isBrowserSessionToken(cachedToken)) setToken("");
-};
 
 export const setToken = (token: string): void => {
   cachedToken = token.trim();

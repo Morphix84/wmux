@@ -6,7 +6,8 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { WebSocket } from "ws";
-import { hashPassword, issueSessionToken, type AuthConfig } from "../src/server/auth.js";
+import { hashPassword, type AuthConfig } from "../src/server/auth.js";
+import { BROWSER_SESSION_COOKIE } from "../src/server/browser-session-cookie.js";
 import { createHttpServer } from "../src/server/http.js";
 import type { SessionManager } from "../src/server/session-manager.js";
 import { SettingsStore } from "../src/server/settings.js";
@@ -37,7 +38,6 @@ test("login-only enforces scoped REST and WebSocket transports end to end", asyn
     automationToken: "A".repeat(43),
     helperToken: "H".repeat(43),
   };
-  const session = issueSessionToken(auth.sessionSecret, 60_000, Date.now());
   const machines: MachineConfig[] = [
     { id: "local", name: "Local", kind: "local" },
     { id: "win", name: "Windows", kind: "powershell-ssh", host: "127.0.0.1" },
@@ -50,6 +50,7 @@ test("login-only enforces scoped REST and WebSocket transports end to end", asyn
   } as unknown as SessionManager;
   const server = await createHttpServer("127.0.0.1", state, machines, sessions, settings, {
     auth,
+    browserSessionCookieSecure: false,
     healthResolvers: { machines: async () => [], streams: async () => [] },
   });
   server.listen(0, "127.0.0.1");
@@ -60,23 +61,54 @@ test("login-only enforces scoped REST and WebSocket transports end to end", asyn
   const wsBase = base.replace(/^http/, "ws");
   const sockets: WebSocket[] = [];
   try {
+    const login = await fetch(`${base}/api/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        username: "operator",
+        password: "correct horse",
+      }),
+    });
+    assert.equal(login.status, 200);
+    assert.deepEqual(await login.json(), {
+      authenticated: true,
+      expiresInMs: 30 * 24 * 60 * 60 * 1_000,
+    });
+    const setCookie = login.headers.get("set-cookie");
+    assert.ok(setCookie);
+    assert.match(setCookie, new RegExp(`^${BROWSER_SESSION_COOKIE}=`));
+    assert.match(setCookie, /HttpOnly/i);
+    assert.match(setCookie, /SameSite=Strict/i);
+    assert.doesNotMatch(setCookie, /Secure/i);
+    const cookie = setCookie.split(";", 1)[0];
+    const browser = {
+      cookie,
+      "content-type": "application/json",
+    };
     assert.equal((await fetch(`${base}/api/bootstrap`, { headers: bearer(auth.automationToken!) })).status, 200);
     assert.equal((await fetch(`${base}/api/bootstrap?token=${encodeURIComponent(auth.automationToken!)}`)).status, 401);
     assert.equal((await fetch(`${base}/api/bootstrap`, { headers: bearer(auth.helperToken!) })).status, 403);
     assert.equal((await fetch(`${base}/api/bootstrap`, { headers: bearer(auth.token) })).status, 401);
     assert.equal((await fetch(`${base}/api/notifications`, { method: "POST", headers: bearer(auth.helperToken!), body: "{}" })).status, 201);
     assert.equal((await fetch(`${base}/api/notifications`, { method: "POST", headers: bearer(auth.automationToken!), body: "{}" })).status, 403);
-    assert.equal((await fetch(`${base}/api/settings`, { method: "POST", headers: bearer(session), body: "{}" })).status, 200);
+    assert.equal((await fetch(`${base}/api/settings`, { method: "POST", headers: browser, body: "{}" })).status, 200);
     assert.equal((await fetch(`${base}/api/settings`, { method: "POST", headers: bearer(auth.helperToken!), body: "{}" })).status, 403);
-    assert.equal((await fetch(`${base}/api/auth/session`, { headers: bearer(session) })).status, 200);
+    assert.equal((await fetch(`${base}/api/auth/session`, { headers: browser })).status, 200);
+    assert.equal((await fetch(`${base}/api/auth/session?token=${encodeURIComponent(cookie)}`)).status, 401);
+    assert.equal((await fetch(`${base}/api/auth/session`, { headers: bearer(cookie) })).status, 401);
+    const invalidCookie = await fetch(`${base}/api/auth/session`, {
+      headers: { cookie: `${BROWSER_SESSION_COOKIE}=${"x".repeat(43)}` },
+    });
+    assert.equal(invalidCookie.status, 401);
+    assert.match(invalidCookie.headers.get("set-cookie") ?? "", /Max-Age=0/);
     assert.equal((await fetch(`${base}/api/auth/session`, { headers: bearer(auth.automationToken!) })).status, 403);
-    assert.equal((await fetch(`${base}/api/future-route`, { headers: bearer(session) })).status, 401);
+    assert.equal((await fetch(`${base}/api/future-route`, { headers: browser })).status, 401);
     assert.equal((await fetch(`${base}/api/workspaces`, { headers: bearer(auth.automationToken!) })).status, 401);
 
-    const browserBundle = await fetch(`${base}/api/helpers/windows/win`, { headers: bearer(session) });
+    const browserBundle = await fetch(`${base}/api/helpers/windows/win`, { headers: browser });
     assert.equal(browserBundle.status, 403);
     assert.doesNotMatch(await browserBundle.text(), new RegExp(auth.helperToken!));
-    const browserBootstrap = await fetch(`${base}/api/helpers/windows/win/bootstrap`, { headers: bearer(session) });
+    const browserBootstrap = await fetch(`${base}/api/helpers/windows/win/bootstrap`, { headers: browser });
     assert.equal(browserBootstrap.status, 403);
     assert.doesNotMatch(await browserBootstrap.text(), new RegExp(auth.helperToken!));
     assert.equal((await fetch(`${base}/api/helpers/windows/win`, { headers: bearer(auth.helperToken!) })).status, 200);
@@ -102,18 +134,20 @@ test("login-only enforces scoped REST and WebSocket transports end to end", asyn
       method: "DELETE", headers: bearer(auth.helperToken!),
     })).status, 200);
     assert.equal((await fetch(`${base}/api/streams/local/request`, {
-      method: "POST", headers: bearer(session), body: JSON.stringify({ requestId: "browser-request" }),
+      method: "POST", headers: browser, body: JSON.stringify({ requestId: "browser-request" }),
     })).status, 200);
     assert.equal((await fetch(`${base}/api/streams/local/request/browser-request`, {
-      method: "DELETE", headers: bearer(session),
+      method: "DELETE", headers: browser,
     })).status, 200);
 
     sockets.push(await connect(`${wsBase}/ws/panes/pane/output`, bearer(auth.automationToken!)));
     await rejected(`${wsBase}/ws/panes/pane/output?token=${encodeURIComponent(auth.automationToken!)}`);
     await rejected(`${wsBase}/ws/events`, bearer(auth.automationToken!));
     await rejected(`${wsBase}/ws/panes/pane`, bearer(auth.helperToken!));
-    sockets.push(await connect(`${wsBase}/ws/events?token=${encodeURIComponent(session)}`));
-    await rejected(`${wsBase}/ws/future?token=${encodeURIComponent(session)}`);
+    sockets.push(await connect(`${wsBase}/ws/events`, { cookie }));
+    sockets.push(await connect(`${wsBase}/ws/panes/pane`, { cookie }));
+    await rejected(`${wsBase}/ws/events?token=${encodeURIComponent(cookie)}`);
+    await rejected(`${wsBase}/ws/future`, { cookie });
   } finally {
     for (const socket of sockets) socket.terminate();
     server.close();

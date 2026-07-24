@@ -13,7 +13,8 @@ test("login-only gates legacy browser credentials and permits browser sessions",
     const storageKey = "wmux.auth-e2e.paths";
     const paths: string[] = JSON.parse(window.sessionStorage.getItem(storageKey) ?? "[]");
     const record = (value: string | URL) => {
-      paths.push(new URL(String(value), location.href).pathname);
+      const url = new URL(String(value), location.href);
+      paths.push(`${url.pathname}${url.search}`);
       window.sessionStorage.setItem(storageKey, JSON.stringify(paths));
     };
     const originalFetch = window.fetch;
@@ -63,6 +64,26 @@ test("login-only gates legacy browser credentials and permits browser sessions",
   await expect.poll(() => page.evaluate(() =>
     (window as unknown as { __authE2ePaths: string[] }).__authE2ePaths.some((path) => path.startsWith("/ws/panes/")),
   )).toBe(true);
+  expect(await page.evaluate(() => window.localStorage.getItem("wmux.token"))).toBeNull();
+  expect(await page.evaluate(() => document.cookie)).not.toContain("wmux_session");
+  const browserSession = (await page.context().cookies()).find(
+    (cookie) => cookie.name === "wmux_session",
+  );
+  expect(browserSession).toMatchObject({
+    httpOnly: true,
+    sameSite: "Strict",
+  });
+  const authenticatedPaths = await page.evaluate(
+    () => (window as unknown as { __authE2ePaths: string[] }).__authE2ePaths,
+  );
+  const credentialBearingWmuxPaths = authenticatedPaths.filter((path) => {
+    const url = new URL(path, "http://wmux.invalid");
+    const wmuxTransport = url.pathname.startsWith("/api/")
+      || url.pathname === "/ws/events"
+      || url.pathname.startsWith("/ws/panes/");
+    return wmuxTransport && url.searchParams.has("token");
+  });
+  expect(credentialBearingWmuxPaths).toEqual([]);
 
   await page.reload();
   try {
@@ -109,11 +130,12 @@ test("login-only retries transient auth discovery and session validation", async
   await page.goto("/");
   await expect(page.getByRole("textbox", { name: "Username" })).toBeVisible();
   expect(authInfoAttempts).toBe(2);
+  expect(sessionAttempts).toBe(2);
 
   await page.getByRole("textbox", { name: "Username" }).fill(runtime.username);
   await page.getByLabel("Password").fill(runtime.password);
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.locator("main.app-shell")).toBeVisible({ timeout: 20_000 });
-  expect(sessionAttempts).toBe(2);
-  expect(await page.evaluate(() => window.localStorage.getItem("wmux.token")?.startsWith("wsess."))).toBe(true);
+  expect(sessionAttempts).toBe(3);
+  expect(await page.evaluate(() => window.localStorage.getItem("wmux.token"))).toBeNull();
 });

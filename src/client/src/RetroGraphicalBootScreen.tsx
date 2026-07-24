@@ -105,7 +105,7 @@ export function RetroGraphicalBootScreen({
     setStatus("Verifying credentials");
     try {
       const result = await api.login(username, password);
-      setToken(result.token);
+      if (result.token) setToken(result.token);
       onAuthenticated();
       setPhase("ready");
       setStatus("WMUX ready");

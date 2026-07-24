@@ -7,7 +7,9 @@ import path from "node:path";
 import test from "node:test";
 import { AgentSessionService } from "../src/server/agent-sessions.js";
 import { AgentTimelineStore } from "../src/server/agent-timeline.js";
-import { issueSessionToken, type AuthConfig } from "../src/server/auth.js";
+import type { AuthConfig } from "../src/server/auth.js";
+import { BROWSER_SESSION_COOKIE } from "../src/server/browser-session-cookie.js";
+import { BrowserSessionStore } from "../src/server/browser-session-store.js";
 import { createHttpServer } from "../src/server/http.js";
 import { RepositoryReviewService } from "../src/server/repository-review.js";
 import type { SessionManager } from "../src/server/session-manager.js";
@@ -23,6 +25,10 @@ const bearer = (token: string): Record<string, string> => ({
   authorization: `Bearer ${token}`,
   "content-type": "application/json",
 });
+const browserCookie = (cookie: string): Record<string, string> => ({
+  cookie,
+  "content-type": "application/json",
+});
 
 interface HttpFixture {
   directory: string;
@@ -33,7 +39,7 @@ interface HttpFixture {
   remotePaneId: string;
   nonRepositoryPaneId: string;
   auth: AuthConfig;
-  sessionToken: string;
+  sessionCookie: string;
   server: Awaited<ReturnType<typeof createHttpServer>>;
   baseUrl: string;
 }
@@ -70,7 +76,12 @@ const createFixture = async (): Promise<HttpFixture> => {
     automationToken: "A".repeat(43),
     helperToken: "H".repeat(43),
   };
-  const sessionToken = issueSessionToken(auth.sessionSecret, 60_000, Date.now());
+  const browserSessions = new BrowserSessionStore(
+    auth.sessionSecret,
+    path.join(directory, "browser-sessions.json"),
+  );
+  const issuedSession = browserSessions.issue(60_000);
+  const sessionCookie = `${BROWSER_SESSION_COOKIE}=${issuedSession.token}`;
   const settings = new SettingsStore(path.join(directory, "settings.json"));
   const repositoryReviews = new RepositoryReviewService(state, machines, {
     limits: {
@@ -93,6 +104,7 @@ const createFixture = async (): Promise<HttpFixture> => {
     {
       auth,
       registrationToken: "R".repeat(43),
+      browserSessions,
       repositoryReviews,
       agentSessions,
       healthResolvers: { machines: async () => [], streams: async () => [] },
@@ -111,7 +123,7 @@ const createFixture = async (): Promise<HttpFixture> => {
     remotePaneId,
     nonRepositoryPaneId,
     auth,
-    sessionToken,
+    sessionCookie,
     server,
     baseUrl: `http://127.0.0.1:${address.port}`,
   };
@@ -170,7 +182,7 @@ test("repository review HTTP route grants normal browser access only", async () 
       fixture,
       fixture.localPaneId,
       body,
-      bearer(fixture.sessionToken),
+      browserCookie(fixture.sessionCookie),
     );
     assert.equal(browser.status, 201);
     assert.equal(browser.headers.get("cache-control"), "no-store");
@@ -206,7 +218,7 @@ test("repository reviews archive into the active agent timeline", async () => {
       fixture,
       fixture.localPaneId,
       JSON.stringify({ kind: "working-tree" }),
-      bearer(fixture.sessionToken),
+      browserCookie(fixture.sessionCookie),
     );
     assert.equal(response.status, 201);
     const payload = await response.json() as {
@@ -215,7 +227,7 @@ test("repository reviews archive into the active agent timeline", async () => {
     assert.ok(payload.archive.filesTouched.includes("tracked.txt"));
     const archived = await fetch(
       `${fixture.baseUrl}${payload.archive.url}`,
-      { headers: bearer(fixture.sessionToken) },
+      { headers: browserCookie(fixture.sessionCookie) },
     );
     assert.equal(archived.status, 200);
     assert.equal(
@@ -247,7 +259,7 @@ test("repository review HTTP route uses canonical pane state and rejects client 
         executable: "not-git",
         arguments: ["push", "--force"],
       }),
-      bearer(fixture.sessionToken),
+      browserCookie(fixture.sessionCookie),
     );
     assert.equal(response.status, 400);
     assert.deepEqual(await response.json(), { error: "invalid_repository_review_request" });
@@ -256,7 +268,7 @@ test("repository review HTTP route uses canonical pane state and rejects client 
       fixture,
       fixture.localPaneId,
       JSON.stringify({ kind: "working-tree" }),
-      bearer(fixture.sessionToken),
+      browserCookie(fixture.sessionCookie),
     );
     const payload = await canonical.json() as { snapshot: { files: Array<{ path: string }> } };
     assert.equal(canonical.status, 201);
@@ -269,7 +281,7 @@ test("repository review HTTP route uses canonical pane state and rejects client 
 test("repository review HTTP route returns stable typed target and repository errors", async () => {
   const fixture = await createFixture();
   try {
-    const headers = bearer(fixture.sessionToken);
+    const headers = browserCookie(fixture.sessionCookie);
     const body = JSON.stringify({ kind: "working-tree" });
     const unknown = await postReview(fixture, "pane_missing", body, headers);
     assert.equal(unknown.status, 404);
@@ -290,7 +302,7 @@ test("repository review HTTP route returns stable typed target and repository er
 test("repository review HTTP route rejects malformed and unsupported requests", async () => {
   const fixture = await createFixture();
   try {
-    const headers = bearer(fixture.sessionToken);
+    const headers = browserCookie(fixture.sessionCookie);
     for (const body of [
       "{}",
       "null",

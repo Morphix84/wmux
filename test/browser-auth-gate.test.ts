@@ -4,18 +4,17 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { api } from "../src/client/src/api.ts";
-import { clearNonSessionToken, getToken, setToken } from "../src/client/src/token.ts";
+import { getToken, setToken } from "../src/client/src/token.ts";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-test("login-only token filtering keeps only password-issued browser sessions", () => {
+test("login-only mode can clear every browser-stored credential", () => {
   setToken("legacy-browser-token");
-  clearNonSessionToken();
+  setToken("");
   assert.equal(getToken(), "");
   setToken("wsess.payload.signature");
-  clearNonSessionToken();
-  assert.equal(getToken(), "wsess.payload.signature");
   setToken("");
+  assert.equal(getToken(), "");
 });
 
 test("auth metadata is fetched without sending a stored credential", async () => {
@@ -45,7 +44,7 @@ test("the application mounts behind the mode/session gate", () => {
   assert.match(gate, /retryTransient\(api\.authSession\)/);
   const authInfoGate = gate.indexOf("retryTransient(api.authInfo)");
   assert.ok(authInfoGate >= 0 && authInfoGate < gate.indexOf("return <App />"));
-  assert.match(gate, /clearNonSessionToken\(\)/);
+  assert.match(gate, /setToken\(""\)/);
   assert.match(gate, /error instanceof UnauthorizedError/);
   assert.match(gate, /250, 750, 1_500/);
 });

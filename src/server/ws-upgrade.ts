@@ -14,12 +14,14 @@ import type {
   MachineConfig,
 } from "./types.js";
 import { classifyWebSocket } from "./websocket-route.js";
+import type { BrowserSessionStore } from "./browser-session-store.js";
 
 interface WebSocketUpgradeOptions {
   server: http.Server | https.Server;
   bindHost: string;
   protocol: "http" | "https";
   auth: AuthConfig;
+  browserSessions?: BrowserSessionStore;
   dev: boolean;
   sessions: SessionManager;
   currentMachines: () => MachineConfig[];
@@ -120,7 +122,13 @@ export const installWebSocketUpgrade = (
       socket.destroy();
       return;
     }
-    const principal = authenticateRequest(options.auth, request, url);
+    const principal = authenticateRequest(
+      options.auth,
+      request,
+      url,
+      Date.now(),
+      options.browserSessions,
+    );
     if (
       !authorizeWebSocketPrincipal(options.auth, principal, socketClass)
     ) {

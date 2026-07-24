@@ -6,6 +6,7 @@ import type { DelegationConfig } from "../shared/protocol.js";
 import { AgentFollowUpService } from "./agent-follow-up.js";
 import { AgentSessionService } from "./agent-sessions.js";
 import type { AuthConfig } from "./auth.js";
+import { BrowserSessionStore } from "./browser-session-store.js";
 import {
   EventBroadcastRuntime,
   HEALTH_EPOCH_PROCESS_STRIDE,
@@ -72,6 +73,8 @@ export const createHttpServer = (
     agentSessions?: AgentSessionService;
     agentFollowUps?: AgentFollowUpService;
     delegation?: DelegationConfig;
+    browserSessions?: BrowserSessionStore;
+    browserSessionCookieSecure?: boolean;
   },
 ): Promise<WmuxHttpServer> => {
   const { auth, hostRegistry, registrationToken } = options;
@@ -79,6 +82,18 @@ export const createHttpServer = (
   const streamStatusResolver = options.healthResolvers?.streams ?? resolveStreamStatuses;
   const trustedProxies = options.trustedProxies ?? new Set<string>();
   const loginAttempts = new LoginAttemptThrottle();
+  const browserSessionCookieSecure = options.browserSessionCookieSecure
+    ?? (
+      Boolean(options.tls)
+      || isHttpsUrl(process.env.WMUX_PUBLIC_URL)
+    );
+  const browserSessions = (auth.browserAuthMode ?? "shared-or-login") === "login-only"
+    ? options.browserSessions
+      ?? BrowserSessionStore.persistent(
+        auth.sessionSecret,
+        path.join(state.storageDirectory(), "browser-sessions.json"),
+      )
+    : undefined;
   const currentMachines = typeof machineSource === "function" ? machineSource : () => machineSource;
   const repositoryReviews = options.repositoryReviews
     ?? new RepositoryReviewService(state, machineSource);
@@ -125,6 +140,8 @@ export const createHttpServer = (
   const serverDeps: ServerDeps = {
     bindHost,
     auth,
+    browserSessions,
+    browserSessionCookieSecure,
     agentFollowUps,
     agentSessions,
     trustedProxies,
@@ -165,6 +182,7 @@ export const createHttpServer = (
     bindHost,
     protocol,
     auth,
+    browserSessions,
     registrationToken,
     hostRegistry,
     currentMachines,
@@ -196,6 +214,7 @@ export const createHttpServer = (
     bindHost,
     protocol,
     auth,
+    browserSessions,
     dev: Boolean(options.dev),
     sessions,
     currentMachines,
@@ -213,6 +232,15 @@ export const createHttpServer = (
   });
 
   return setupDevServer().then(() => server);
+};
+
+const isHttpsUrl = (value: string | undefined): boolean => {
+  if (!value) return false;
+  try {
+    return new URL(value).protocol === "https:";
+  } catch {
+    return false;
+  }
 };
 
 const cwdForSourcePane = async (

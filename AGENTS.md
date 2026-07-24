@@ -99,7 +99,7 @@ Keep websocket, media, clipboard, hook, and run endpoints behind the same networ
 - Registered panes never receive the broad wmux API token and must not overwrite a pre-existing remote `~/.wmux/token`. Dynamic Windows SSH bootstrap uses a rotating per-machine capability for an inline redacted bundle. API-posting helpers on registered panes require separately provisioned auth and otherwise fail with `401`.
 - Browser authentication defaults to compatibility-preserving `shared-or-login`.
   Opt-in `login-only` requires password-issued browser sessions plus distinct header-only automation and helper credentials, enforced through the exact REST method/path and WebSocket policy.
-  The MVP still stores browser sessions in local storage and uses their query transport for browser WebSockets.
+  Login-only browser sessions use opaque HttpOnly SameSite cookies backed by owner-only server records; browser WebSockets authenticate through the cookie and must not receive credentials in query parameters or local storage.
 - Expired registered hosts remain visible offline and are retained past the normal seven-day window while a pane references them. A referenced ID pins kind/user/port/shell/backend/agent port/token while permitting address-only roaming; a live agent pane pins its address too. Do not dial an offline registration for new attach/refresh. Live pane sessions retain their original machine snapshot so address churn cannot redirect later cleanup.
 - Keep remote-machine behavior explicit in `MachineConfig`; do not hide durable/session behavior in UI-only state.
 - The `local` and SSH machines default to durable `tmux`/`screen` sessions via `sessionBackend: "auto"`.
@@ -192,8 +192,8 @@ Keep websocket, media, clipboard, hook, and run endpoints behind the same networ
 - Remote per-platform wmux agents are partial. Windows has an experimental ConPTY session agent; Linux/macOS agents are not implemented.
 - Windows SSH PowerShell is validated on dogfood Windows hosts. The experimental Windows session agent prefers pywinpty-backed ConPTY, falls back to terminal-normalized stdio when pywinpty is unavailable, contains each pane in a kill-on-close Windows Job Object, supports staged-update draining, and records size-aware replay. Legacy agents require a best-effort 80x24 replay fallback after a wmux restart. Broad full-screen app validation and process preservation across unexpected/forced Windows-agent restarts are still pending.
 - Static machine management is file-based and the dynamic registry has no in-app editor.
-- Optional login-only authentication separates browser, automation, helper, registration, and registered-host credentials, but browser sessions remain in local storage/WebSocket query parameters and the scoped automation/helper credentials are still long-lived within their exact route authorities.
-  Cookie-backed sessions, revocation, and finer per-client capabilities are not implemented.
+- Optional login-only authentication separates browser, automation, helper, registration, and registered-host credentials, and browser sessions use server-backed HttpOnly SameSite cookies.
+  Session revocation, a client/session inventory, and expiring automation/helper credentials are not implemented; scoped automation/helper credentials remain long-lived within their exact route authorities.
 - Dynamic host presence follows the host user's service lifecycle: the POSIX systemd user timer needs lingering to run while logged out, while Windows presence follows the supervised agent task and its selected `Interactive` or `S4U` logon mode.
 - Full cmux-style transcript auto-naming is heuristic. Claude, Codex, and POSIX OpenCode hook paths exist; Windows OpenCode installer parity is not implemented.
 - Kitty graphics support is partial. File/shared-memory transfer, animation frames, z-index layering, scrollback-persistent placement, Sixel, and iTerm2 image protocols are not complete.
