@@ -64,7 +64,10 @@ export class RawPtyBackend implements SessionBackend {
   }
 
   readReplay(session: BackendSession, outputOnly = false): ReturnType<SessionBackend["readReplay"]> {
-    if (!outputOnly && session.attachReplay) return session.attachReplay;
+    if (!outputOnly) {
+      const attachReplay = session.attachReplay;
+      if (attachReplay) return attachReplay;
+    }
     return { data: session.replayOutput, kind: "raw" };
   }
 

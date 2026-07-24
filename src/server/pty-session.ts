@@ -30,6 +30,7 @@ export class PtySession extends EventEmitter<PtyEvents> {
   private cwd = "";
   private cwdCaptureBuffer = "";
   private liveResetEmitted = false;
+  private restoredReplayConsumed = false;
 
   constructor(
     readonly pane: PaneState,
@@ -95,12 +96,20 @@ export class PtySession extends EventEmitter<PtyEvents> {
       this.replayTruncated,
       this.checkpoint,
     );
-    if (!this.restoredCheckpoint || this.liveResetEmitted) return current;
-    return this.restoredCheckpoint;
+    if (!this.restoredCheckpoint || this.restoredReplayConsumed) return current;
+    if (!this.liveResetEmitted) return this.restoredCheckpoint;
+    this.restoredReplayConsumed = true;
+    return {
+      data: this.restoredCheckpoint.data
+        + (current.data ? `\x1bc${current.data}` : ""),
+      kind: "checkpoint",
+    };
   }
 
   get restoredAttachReplay(): AttachReplay | undefined {
-    return this.liveResetEmitted ? undefined : this.restoredCheckpoint;
+    return this.restoredReplayConsumed
+      ? undefined
+      : this.restoredCheckpoint;
   }
 
   get screenCheckpoint(): AttachReplay | undefined {
