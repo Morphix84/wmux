@@ -14,7 +14,7 @@ import {
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 test("Windows agent protocol exports stable paths and bounded polling semantics", () => {
-  assert.equal(WINDOWS_AGENT_PROTOCOL_VERSION, 5);
+  assert.equal(WINDOWS_AGENT_PROTOCOL_VERSION, 6);
   assert.equal(WINDOWS_AGENT_PATHS.session("pane one"), "/sessions/pane%20one");
   assert.equal(
     WINDOWS_AGENT_PATHS.output("pane one", 42, WINDOWS_AGENT_LONG_POLL.defaultTimeoutMs),
@@ -165,6 +165,76 @@ print(json.dumps({"ok": ok, "snapshot": snapshot}))
   assert.equal(payload.snapshot.configured, false);
   assert.match(payload.snapshot.lastError, /url, registration-token, heartbeat\.json/);
   assert.equal(payload.snapshot.consecutiveFailures, 0);
+});
+
+test("native agents restart the owned stream worker and disable rollout ownership", () => {
+  const source = String.raw`
+import json
+import os
+import runpy
+import tempfile
+import time
+
+module = runpy.run_path("scripts/wmux-windows-agent")
+with tempfile.TemporaryDirectory() as state_dir:
+    agent_config_path = os.path.join(state_dir, "windows-agent.json")
+    stream_config_path = os.path.join(state_dir, "stream-agent.json")
+    worker_path = os.path.join(state_dir, "fake-stream-worker.py")
+    counter_path = os.path.join(state_dir, "starts.txt")
+    with open(agent_config_path, "w", encoding="utf-8") as handle:
+        json.dump({}, handle)
+    with open(stream_config_path, "w", encoding="utf-8") as handle:
+        json.dump({"machine": "test", "onDemand": True}, handle)
+    with open(worker_path, "w", encoding="utf-8") as handle:
+        handle.write(
+            "import os,sys\n"
+            "counter = os.path.join(os.path.dirname(__file__), 'starts.txt')\n"
+            "with open(counter, 'a', encoding='utf-8') as output: output.write('start\\n')\n"
+            "raise SystemExit(7)\n"
+        )
+    supervisor = module["StreamSupervisor"](
+        {"streamAgentPath": worker_path},
+        agent_config_path,
+    )
+    supervisor.start()
+    deadline = time.monotonic() + 5
+    starts = 0
+    while time.monotonic() < deadline:
+        try:
+            with open(counter_path, "r", encoding="utf-8") as handle:
+                starts = len(handle.readlines())
+        except OSError:
+            starts = 0
+        if starts >= 2:
+            break
+        time.sleep(0.05)
+    supervisor.stop()
+    snapshot = supervisor.snapshot()
+    rollout = module["StreamSupervisor"](
+        {"streamOwner": False, "streamAgentPath": worker_path},
+        agent_config_path,
+    )
+    rollout.start()
+    rollout_snapshot = rollout.snapshot()
+print(json.dumps({
+    "starts": starts,
+    "snapshot": snapshot,
+    "rollout": rollout_snapshot,
+}))
+`;
+  const result = spawnSync("python3", ["-c", source], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    timeout: 10_000,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.starts, 2);
+  assert.ok(payload.snapshot.restartCount >= 1);
+  assert.equal(payload.snapshot.running, false);
+  assert.equal(payload.snapshot.lastExitCode, 7);
+  assert.equal(payload.rollout.owner, false);
+  assert.equal(payload.rollout.running, false);
 });
 
 test("Windows agent answers terminal queries locally and suppresses delayed browser duplicates", () => {
@@ -487,8 +557,8 @@ with tempfile.TemporaryDirectory() as root:
   assert.deepEqual(JSON.parse(result.stdout), {
     unauthorized: 401,
     accepted: 201,
-    capabilities: ["paste-images-v1", "registration-heartbeat-v1"],
-    protocol: 5,
+    capabilities: ["paste-images-v1", "registration-heartbeat-v1", "stream-supervision-v1"],
+    protocol: 6,
     deleted: true,
     remains: false,
   });

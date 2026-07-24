@@ -27,6 +27,9 @@ test("packaged Windows agent owns heartbeat and retires the legacy task", () => 
   assert.match(source, /Unregister-ScheduledTask -TaskName \$LegacyHeartbeatTaskName/);
   assert.match(source, /CommandLine -like '\*wmux-heartbeat\*\.ps1\*'/);
   assert.match(source, /heartbeatEnabled -NotePropertyValue \$false/);
+  assert.match(source, /function Remove-LegacyStreamTask/);
+  assert.match(source, /Unregister-ScheduledTask -TaskName \$LegacyStreamTaskName/);
+  assert.match(source, /streamOwner -NotePropertyValue \$false/);
   const stopBlock = source.slice(source.indexOf("'stop' {"), source.indexOf("'status' {"));
   assert.match(stopBlock, /Remove-LegacyHeartbeatTask/);
 

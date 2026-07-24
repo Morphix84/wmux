@@ -47,10 +47,10 @@ The desktop view and both mobile surfaces show the same live Codex workspace.
 | Agent sessions | `AgentSessionService` owns persisted delegation transitions and side effects; the versioned timeline store retains prompts, outcomes, touched files, and archived working-tree snapshots; Codex, Claude, and OpenCode adapters own runtime-specific TUI and optional headless behavior |
 | Session manager | One live client per pane, persisted registered-host disposal snapshots, temporary image staging, bounded replay, VT checkpoints, resize ownership, and dispatch through the shared `SessionBackend` contract |
 | Machine catalog | Merges static `wmux.config.json` machines with dynamically registered heartbeat hosts |
-| Execution backends | Raw PTY, durable `tmux`/`screen`, and native session-agent adapters; POSIX and Windows agents own pane processes, replay, and dynamic-registration heartbeat |
+| Execution backends | Raw PTY, durable `tmux`/`screen`, and native session-agent adapters; POSIX and Windows agents own pane processes, replay, dynamic-registration heartbeat, and view-only capture supervision |
 | Shared contracts | TypeScript browser/server protocol plus generated Python delegation and Windows-agent constants checked by `npm run check:contracts` |
 | Persistent state | Workspace layout, delegation outcomes, registered-host disposal endpoints, settings, persistent mobile attachments, and metadata under `~/.wmux`; expiring paste-image stages are not workspace state |
-| Optional streaming | Machine-local MediaMTX capture or a Moonlight/Sunshine gateway, requested by the browser |
+| Optional streaming | Native-agent-supervised, lease-driven MediaMTX capture for view-only streams, plus a separate Moonlight/Sunshine gateway for Moonlight-native interaction |
 
 The server owns canonical workspace state and one live session client per
 pane. Browsers are attachable views: refreshing or closing a browser does not
@@ -770,7 +770,7 @@ validation.
 
 Linux and macOS can run the native `wmux-session-agent` under systemd user
 services or launchd. It owns a real PTY, bounded replay, resize history, staged
-paste files, and the optional dynamic-registration heartbeat.
+paste files, the optional dynamic-registration heartbeat, and on-demand screen-capture supervision.
 
 ```bash
 mkdir -p ~/.wmux
@@ -857,22 +857,22 @@ Remote cleanup uses the persisted server-only endpoint snapshot, so dynamic ID r
 
 ## Screen Streaming
 
-wmux supports two machine-local streaming paths:
-
-- MediaMTX plus `wmux-stream-agent` for on-demand, view-only WebRTC capture.
-- A Moonlight/Sunshine gateway for browser-native interactive streaming.
+wmux uses one agent-owned path for on-demand, view-only capture.
+The native POSIX or Windows agent supervises `wmux-stream-agent`, which publishes RTSP to private MediaMTX only while a browser holds a lease.
+MediaMTX provides browser WebRTC playback.
+The separate Moonlight/Sunshine gateway remains only for Moonlight-native interactive streaming.
 
 ```bash
 scripts/install-stream-service.sh
-wmux-stream-agent-service install
-wmux-stream-agent-service status
+scripts/install-session-agent-service.sh
 ```
 
-Capture runs only while a browser holds a stream lease. macOS requires Screen
-Recording permission; Windows capture should run through the per-user Scheduled
-Task in the interactive desktop session. Keep RTSP, WebRTC, and gateway ports on
-the private interface. See [docs/MOONLIGHT_GATEWAY.md](docs/MOONLIGHT_GATEWAY.md)
-for Moonlight/Sunshine setup and security notes.
+On Windows, use `wmux-windows-setup install-agent`.
+The agent restarts a failed capture worker with bounded backoff and retires the former standalone capture supervisor during installation.
+Capture still runs only while a browser holds a stream lease.
+Keep RTSP, WebRTC, and gateway ports on the private interface.
+See [docs/STREAMING.md](docs/STREAMING.md) for the per-platform setup and transport decision.
+See [docs/MOONLIGHT_GATEWAY.md](docs/MOONLIGHT_GATEWAY.md) for Moonlight/Sunshine setup and security notes.
 
 ## Mobile
 
@@ -920,8 +920,10 @@ known implementation gaps. Report vulnerabilities privately according to the
   post back to wmux.
 - Kitty graphics support is partial; Sixel and iTerm2 image protocols are not
   implemented.
-- Full-screen Windows app coverage and pixel-streaming automation remain works
-  in progress.
+- View-only streaming is supervised by the native agent, but Wayland capture,
+  locked or logged-out Windows capture, macOS permission automation, Sunshine
+  app-launch automation, and full-screen Windows app coverage remain works in
+  progress.
 
 ## License
 

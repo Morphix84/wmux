@@ -79,6 +79,8 @@ test("Windows agent config prefers ConPTY with stdio fallback", () => {
   assert.equal(buildWindowsHelperBundle(machine).agentConfig.heartbeatOwner, true);
   assert.equal(buildWindowsHelperBundle(machine).agentConfig.heartbeatEnabled, true);
   assert.equal(buildWindowsHelperBundle(machine).agentConfig.heartbeatIntervalSeconds, 30);
+  assert.equal(buildWindowsHelperBundle(machine).agentConfig.streamOwner, true);
+  assert.equal(buildWindowsHelperBundle(machine).agentConfig.streamEnabled, true);
 });
 
 test("clipboard helper sends bearer auth and reads staged fallback files", () => {
@@ -218,7 +220,7 @@ test("health probe reports the staged and expected bundle versions", () => {
 
 test("agent bundle uses the platform release and exposes protocol compatibility separately", () => {
   assert.match(expectedWindowsAgentReleaseVersion(), /^v\d+\.\d+\.\d+-win$/);
-  assert.equal(expectedWindowsAgentProtocolVersion(), 5);
+  assert.equal(expectedWindowsAgentProtocolVersion(), 6);
   const agent = buildWindowsHelperBundle(machine).files.find((file) => file.name === "wmux-windows-agent.py");
   assert.ok(agent);
   const content = Buffer.from(agent.dataBase64, "base64").toString("utf8");
@@ -231,6 +233,7 @@ test("agent bundle uses the platform release and exposes protocol compatibility 
   const protocolContent = Buffer.from(protocol.dataBase64, "base64").toString("utf8");
   assert.ok(protocolContent.includes(`WINDOWS_AGENT_PROTOCOL_VERSION = ${expectedWindowsAgentProtocolVersion()}`));
   assert.ok(protocolContent.includes('"paste-images-v1"'));
+  assert.ok(protocolContent.includes('"stream-supervision-v1"'));
   assert.ok(protocolContent.includes('"registration-heartbeat-v1"'));
   assert.ok(content.includes("MAX_PASTE_IMAGE_BYTES = 8 * 1024 * 1024"));
   assert.ok(!content.includes("__WMUX_WINDOWS_AGENT_RELEASE_VERSION__"));
@@ -261,6 +264,7 @@ test("Windows agent service drains staged updates and refuses unsafe restarts", 
   assert.ok(content.includes("Remove-LegacyHeartbeatTask"));
   assert.ok(content.includes("heartbeatEnabled -NotePropertyValue $false"));
   assert.ok(content.includes("heartbeatOwner -NotePropertyValue $false"));
+  assert.ok(content.includes("streamOwner -NotePropertyValue $false"));
   assert.ok(content.includes("'retire-generation'"));
   assert.ok(content.includes("function Remove-AgentGeneration"));
   assert.ok(content.includes("the base agent cannot be retired"));

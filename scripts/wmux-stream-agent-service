@@ -124,6 +124,11 @@ bootout() {
 }
 
 case "${action}" in
+  prepare)
+    write_plist
+    rm -f "${plist}"
+    echo "Prepared ${app_dir} for native-agent capture supervision"
+    ;;
   install)
     write_plist
     bootout
@@ -182,7 +187,7 @@ case "${action}" in
     echo "Grant Screen Recording permission to: ${app_dir}"
     ;;
   *)
-    echo "usage: wmux-stream-agent-service [install|restart|stop|uninstall|status|logs|diagnose|open-permissions]" >&2
+    echo "usage: wmux-stream-agent-service [prepare|install|restart|stop|uninstall|status|logs|diagnose|open-permissions]" >&2
     exit 2
     ;;
 esac

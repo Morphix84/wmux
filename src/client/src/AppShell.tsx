@@ -1144,7 +1144,7 @@ export function AppShell() {
                 : "Moonlight gateway offline"
             : activeStream?.live
               ? `${activeStream.viewerCount} viewers`
-              : "Waiting for wmux-stream-agent",
+              : "Waiting for native-agent capture",
         section: "View",
         disabled: !canOpenStream,
         run: () => setStreamOpen(true),

@@ -16,6 +16,8 @@ chmod 700 "${STATE_DIR}"
 chmod 600 "${CONFIG_PATH}"
 ln -sfn "${ROOT_DIR}/scripts/wmux-session-agent" "${BIN_DIR}/wmux-session-agent"
 ln -sfn "${ROOT_DIR}/scripts/wmux-windows-agent" "${BIN_DIR}/wmux-windows-agent"
+ln -sfn "${ROOT_DIR}/scripts/wmux-stream-agent" "${BIN_DIR}/wmux-stream-agent"
+ln -sfn "${ROOT_DIR}/scripts/wmux-stream-agent-service" "${BIN_DIR}/wmux-stream-agent-service"
 
 case "$(uname -s)" in
   Linux)
@@ -23,6 +25,7 @@ case "$(uname -s)" in
     mkdir -p "${UNIT_DIR}"
     cp "${ROOT_DIR}/deploy/wmux-session-agent.service.example" "${UNIT_DIR}/wmux-session-agent.service"
     systemctl --user disable --now wmux-heartbeat.timer wmux-heartbeat.service >/dev/null 2>&1 || true
+    systemctl --user disable --now wmux-stream-agent.service >/dev/null 2>&1 || true
     systemctl --user daemon-reload
     systemctl --user enable --now wmux-session-agent.service
     echo "wmux-session-agent.service installed"
@@ -31,6 +34,9 @@ case "$(uname -s)" in
     PLIST_DIR="${HOME}/Library/LaunchAgents"
     PLIST_PATH="${PLIST_DIR}/io.wmux.session-agent.plist"
     mkdir -p "${PLIST_DIR}"
+    "${BIN_DIR}/wmux-stream-agent-service" uninstall >/dev/null 2>&1 || true
+    WMUX_STREAM_AGENT_BIN="${BIN_DIR}/wmux-stream-agent" \
+      "${BIN_DIR}/wmux-stream-agent-service" prepare
     sed "s|__HOME__|${HOME//&/\\&}|g" \
       "${ROOT_DIR}/deploy/io.wmux.session-agent.plist.example" > "${PLIST_PATH}"
     chmod 600 "${PLIST_PATH}"
@@ -38,6 +44,7 @@ case "$(uname -s)" in
     launchctl bootstrap "gui/$(id -u)" "${PLIST_PATH}"
     launchctl enable "gui/$(id -u)/io.wmux.session-agent"
     echo "io.wmux.session-agent installed"
+    echo "Screen Recording permission target: ${STATE_DIR}/WmuxStreamAgent.app"
     ;;
   *)
     echo "wmux POSIX session agent supervision supports Linux and macOS" >&2

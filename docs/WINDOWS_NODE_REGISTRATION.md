@@ -211,11 +211,12 @@ The node is registered correctly when wmux reports:
   "kind": "powershell-ssh",
   "reachable": true,
   "endpoint": "100.64.0.30:22",
-  "backendDetail": "SSH-launched PowerShell; pwsh 7.6.1; helpers ready; stream task Running; ffmpeg+python"
+  "backendDetail": "SSH-launched PowerShell; pwsh 7.6.1; helpers ready; stream supervisor Running; ffmpeg+python"
 }
 ```
 
-For `powershell-ssh`, `/api/bootstrap` does more than a TCP check. It runs a short encoded PowerShell health probe over SSH and reports helper readiness, `WMUX_URL` reachability through `/api/health`, FFmpeg/Python availability, and the `wmux-stream-agent` Scheduled Task state.
+For `powershell-ssh`, `/api/bootstrap` does more than a TCP check.
+It runs a short encoded PowerShell health probe over SSH and reports helper readiness, `WMUX_URL` reachability through `/api/health`, FFmpeg/Python availability, and native-agent capture supervision state.
 
 ## Optional: Dynamic Registration And Heartbeats
 
@@ -307,8 +308,6 @@ Then run:
 wmux-windows-setup validate
 wmux-windows-setup persist-path
 wmux-windows-setup install-deps
-wmux-windows-setup install-stream
-wmux-windows-setup stream-status
 wmux-windows-setup install-agent
 wmux-windows-setup configure-agent-firewall <wmux-server-internal-ip>
 wmux-windows-setup agent-status
@@ -316,14 +315,15 @@ wmux-windows-setup agent-status
 
 Notes:
 
-- `validate` prints a JSON report for helper state, wmux API reachability, FFmpeg/Python/pywinpty/winget availability, hook config files, and stream Scheduled Task state.
+- `validate` prints a JSON report for helper state, wmux API reachability, FFmpeg/Python/pywinpty/winget availability, hook config files, and native-agent capture supervision state.
 - `persist-path` adds `%LOCALAPPDATA%\wmux\bin` to the persistent user PATH for future non-wmux shells.
 - `install-deps` uses `winget` to install `Gyan.FFmpeg` and `Python.Python.3.12` when missing, then installs `pywinpty` with pip. It executes Python during detection so the Microsoft Store app-execution alias is not mistaken for an installed runtime.
-- `install-stream` installs and starts the per-user `wmux-stream-agent` Scheduled Task.
-- `install-agent` installs and starts the per-user `wmux-windows-agent` Scheduled Task for experimental restart-durable sessions and in-process dynamic registration. It removes a legacy standalone `wmux-heartbeat` task during migration.
+- `install-agent` installs and starts the per-user `wmux-windows-agent` Scheduled Task for restart-durable sessions, in-process dynamic registration, and view-only capture supervision.
+  It removes legacy standalone `wmux-heartbeat` and `wmux-stream-agent` tasks during migration.
+- `install-stream` remains a compatibility alias for `install-agent`, and `stream-status` reports the native agent.
 - `configure-agent-firewall` must run from an elevated PowerShell session. It allows the configured base `agentPort` and eight adjacent rollout ports only from the exact Tailscale/RFC1918/IPv6 ULA wmux server addresses passed on the command line. For the default base port, the bounded range is `3481-3489`. `install-agent` warns when this managed rule is absent or stale.
 - `agent-firewall-status` prints the expected range and current managed-rule state as JSON. If you manage Windows Firewall separately, create an equivalent exact-source rule for the same nine-port range; opening only the base port prevents safe side-by-side updates.
-- Both Windows Scheduled Tasks start at user logon, start when available, restart after failure, have no fixed execution-time cutoff, and launch through hidden PowerShell wrappers instead of visible `cmd.exe` windows.
+- The Windows agent task starts at user logon, starts when available, restarts after failure, has no fixed execution-time cutoff, and launches through a hidden PowerShell wrapper instead of a visible `cmd.exe` window.
 
 If you are running setup from plain SSH before the helper directory is on PATH, invoke the staged script by path:
 
@@ -339,10 +339,12 @@ Direct capture probes from plain SSH can fail with Windows desktop access errors
 wmux-stream-agent --probe-capture
 ```
 
-The intended Windows streaming path is the per-user Scheduled Task. Validate that the task is idle and waiting:
+The intended Windows streaming path is the base native-agent Scheduled Task.
+Validate that its capture supervisor is configured and running:
 
 ```powershell
-wmux-stream-agent-service logs
+wmux-windows-setup agent-status
+wmux-windows-setup agent-logs
 ```
 
 From the wmux server, request a short stream lease:
@@ -387,7 +389,7 @@ Expected:
 {
   "ok": true,
   "releaseVersion": "v0.1.2-win",
-  "protocolVersion": 5,
+  "protocolVersion": 6,
   "machine": "windows-box",
   "backend": "conpty",
   "conptyAvailable": true,
@@ -446,7 +448,7 @@ The agent task uses `Interactive` logon when a desktop user is logged in and fal
 - Creating a wmux workspace on `windows-box` opens an interactive PowerShell session.
 - New Windows panes stage helper scripts into `%LOCALAPPDATA%\wmux\bin`.
 - `wmux-notify`, `wmux-title`, `wmux-agent-event`, `wmux-run`, `wmux-media`, `wmux-copy`, `wmux-clip`, `wclip`, `wmclip`, `wmux-hooks`, `wmux-stream-agent-service`, and `wmux-windows-setup` resolve inside new Windows panes.
-- `wmux-windows-setup validate` reports `wmuxApi.reachable: true`, helper scripts present, FFmpeg/Python/pywinpty available, and the stream task running.
+- `wmux-windows-setup validate` reports `wmuxApi.reachable: true`, helper scripts present, FFmpeg/Python/pywinpty available, and native-agent capture supervision running.
 - A short `/api/streams/windows-box/request` lease causes the Windows stream agent to publish `wmux-windows-box`, then return idle after release.
 - `wmux-windows-setup validate` reports the `wmux-windows-agent` helper and agent config present.
 - `curl http://100.64.0.30:3481/health` reports the Windows session agent as healthy.
@@ -463,5 +465,6 @@ The agent task uses `Interactive` logon when a desktop user is logged in and fal
 - Legacy Windows SSH PowerShell panes are not durable. Agent-backed Windows panes are owned by `wmux-windows-agent`; wmux service shutdown detaches its client while explicit pane closure deletes the owned pane process and its Windows Job Object, terminating detached descendants.
 - Windows helper staging and cwd reporting require a new pane after the wmux service has been updated. For agent-backed hosts, that pane also activates a staged agent update when it is safe.
 - `wmuxctl run` and `wmuxctl ps` automatically recognize the standard `PS ...>` readiness prompt. An arbitrary profile-defined prompt may not match; after confirming the custom prompt is visible, use `--no-wait-ready` or target the pane with `wmuxctl send`.
-- Windows screen streaming is validated on a dogfood Windows host through FFmpeg/gdigrab and the supervised per-user Scheduled Task. Locked/logged-out behavior and a fuller Windows wmux agent are still not implemented.
+- Windows screen streaming is validated on a dogfood Windows host through FFmpeg/gdigrab and native-agent supervision.
+  Locked and logged-out behavior is still not implemented.
 - The managed Windows session agent uses `backend: "auto"`, preferring pywinpty-backed ConPTY and falling back to terminal-normalized stdio when pywinpty is unavailable. It is restart-durable across `wmux.service` restarts while the owning Windows agent generation keeps running. Agent releases use the same platform-suffixed wmux version shown by the UI (for example, `v0.1.2-win`); the HTTP protocol version is reported separately. Automatic rollout is side-by-side; protocol v2 separates update-pending from hard-drain state, protocol v3 refreshes durable callback state on attach, and protocol v5 carries the per-session PowerShell profile preference. It supports terminal-safe stdio newlines, byte-exact resize boundaries, and applying an available `wmux-agent-profile` before a new PowerShell session. Legacy agents use a compatibility watcher plus a best-effort 80x24 replay fallback. A forced Windows-agent restart still kills owned pane processes, so process preservation across an unexpected agent crash and broad full-screen app validation remain pending.

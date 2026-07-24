@@ -69,6 +69,7 @@ PROCESS_SET_QUOTA = 0x0100
 AGENT_RESTART_EXIT_CODE = 75
 DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 30
 DEFAULT_HEARTBEAT_TIMEOUT_SECONDS = 15
+DEFAULT_STREAM_RESTART_MAX_SECONDS = 30
 
 
 def agent_program_name() -> str:
@@ -595,6 +596,171 @@ class RegistrationHeartbeat:
         if changed:
             print(f"{agent_program_name()}: {message}", file=sys.stderr)
         return False
+
+
+def stream_config_path(agent_config: dict[str, Any], agent_config_path: str) -> str:
+    configured = config_string(agent_config, "streamConfig")
+    if configured:
+        return os.path.abspath(os.path.expandvars(os.path.expanduser(configured)))
+    state_dir = config_string(agent_config, "stateDir")
+    parent = state_dir or os.path.dirname(os.path.abspath(os.path.expanduser(agent_config_path)))
+    return os.path.join(os.path.expandvars(os.path.expanduser(parent)), "stream-agent.json")
+
+
+def stream_worker_command(
+    agent_config: dict[str, Any],
+    agent_config_path: str,
+) -> tuple[list[str], str] | None:
+    config_path = stream_config_path(agent_config, agent_config_path)
+    if not os.path.isfile(config_path):
+        return None
+    explicit = config_string(agent_config, "streamAgentPath")
+    helper_dir = config_string(agent_config, "helperDir")
+    candidates = [
+        explicit,
+        os.path.join(
+            os.path.dirname(config_path),
+            "WmuxStreamAgent.app",
+            "Contents",
+            "MacOS",
+            "WmuxStreamAgent",
+        ),
+        os.path.join(helper_dir, "wmux-stream-agent.cmd") if helper_dir else "",
+        os.path.join(helper_dir, "wmux-stream-agent.py") if helper_dir else "",
+        os.path.join(_PROTOCOL_SEARCH_ROOT, "wmux-stream-agent"),
+        os.path.join(_PROTOCOL_SEARCH_ROOT, "wmux-stream-agent.py"),
+        shutil.which("wmux-stream-agent") or "",
+    ]
+    worker = next(
+        (
+            os.path.abspath(os.path.expandvars(os.path.expanduser(candidate)))
+            for candidate in candidates
+            if candidate
+            and os.path.isfile(os.path.expandvars(os.path.expanduser(candidate)))
+        ),
+        "",
+    )
+    if not worker:
+        return None
+    arguments = [worker, "--config", config_path]
+    if worker.lower().endswith(".py"):
+        arguments.insert(0, sys.executable)
+    elif os.name == "nt" and worker.lower().endswith((".cmd", ".bat")):
+        arguments = [os.environ.get("COMSPEC", "cmd.exe"), "/d", "/s", "/c", *arguments]
+    return arguments, config_path
+
+
+class StreamSupervisor:
+    def __init__(self, agent_config: dict[str, Any], agent_config_path: str):
+        self.agent_config = agent_config
+        self.agent_config_path = agent_config_path
+        self.owner = config_bool(agent_config, "streamOwner", True)
+        self.enabled = config_bool(agent_config, "streamEnabled", True)
+        self.stop_event = threading.Event()
+        self.lock = threading.Lock()
+        self.thread: threading.Thread | None = None
+        self.process: subprocess.Popen[bytes] | None = None
+        self.status: dict[str, Any] = {
+            "owner": self.owner,
+            "enabled": self.enabled,
+            "configured": os.path.isfile(stream_config_path(agent_config, agent_config_path)),
+            "running": False,
+            "pid": None,
+            "restartCount": 0,
+            "lastStartedAt": None,
+            "lastExitAt": None,
+            "lastExitCode": None,
+            "lastError": None,
+        }
+
+    def snapshot(self) -> dict[str, Any]:
+        with self.lock:
+            return dict(self.status)
+
+    def start(self) -> None:
+        if not self.owner or not self.enabled or self.thread:
+            return
+        self.thread = threading.Thread(
+            target=self._run,
+            name="wmux-stream-supervisor",
+            daemon=True,
+        )
+        self.thread.start()
+
+    def stop(self) -> None:
+        self.stop_event.set()
+        with self.lock:
+            process = self.process
+        if process and process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                process.kill()
+        if self.thread and self.thread.is_alive():
+            self.thread.join(timeout=4)
+
+    def _run(self) -> None:
+        failures = 0
+        while not self.stop_event.is_set():
+            resolved = stream_worker_command(self.agent_config, self.agent_config_path)
+            if not resolved:
+                with self.lock:
+                    self.status["configured"] = os.path.isfile(
+                        stream_config_path(self.agent_config, self.agent_config_path)
+                    )
+                    self.status["lastError"] = (
+                        "stream config is missing"
+                        if not self.status["configured"]
+                        else "wmux-stream-agent executable was not found"
+                    )
+                self.stop_event.wait(DEFAULT_STREAM_RESTART_MAX_SECONDS)
+                continue
+            command, _config_path = resolved
+            started_at = time.monotonic()
+            try:
+                process = subprocess.Popen(command)
+                with self.lock:
+                    self.process = process
+                    self.status.update({
+                        "configured": True,
+                        "running": True,
+                        "pid": process.pid,
+                        "lastStartedAt": utc_timestamp(),
+                        "lastError": None,
+                    })
+                while process.poll() is None and not self.stop_event.wait(0.25):
+                    pass
+                if self.stop_event.is_set() and process.poll() is None:
+                    process.terminate()
+                exit_code = process.wait()
+                ran_seconds = time.monotonic() - started_at
+                failures = 0 if ran_seconds >= 30 else failures + 1
+                with self.lock:
+                    self.process = None
+                    self.status.update({
+                        "running": False,
+                        "pid": None,
+                        "restartCount": self.status["restartCount"] + (
+                            0 if self.stop_event.is_set() else 1
+                        ),
+                        "lastExitAt": utc_timestamp(),
+                        "lastExitCode": exit_code,
+                    })
+            except OSError as error:
+                failures += 1
+                with self.lock:
+                    self.process = None
+                    self.status.update({
+                        "running": False,
+                        "pid": None,
+                        "lastExitAt": utc_timestamp(),
+                        "lastError": str(error),
+                        "restartCount": self.status["restartCount"] + 1,
+                    })
+            if self.stop_event.is_set():
+                return
+            self.stop_event.wait(min(DEFAULT_STREAM_RESTART_MAX_SECONDS, 2 ** min(failures, 5)))
 
 
 def retire_legacy_heartbeat_task(config: dict[str, Any]) -> None:
@@ -1494,6 +1660,7 @@ class AgentState:
         self.restart_scheduled = False
         self.shutdown_callback: Callable[[], None] | None = None
         self.registration_heartbeat: RegistrationHeartbeat | None = None
+        self.stream_supervisor: StreamSupervisor | None = None
 
     def get_or_create(self, session_id: str, payload: dict[str, Any]) -> Session:
         with self.lock:
@@ -1556,6 +1723,9 @@ class AgentState:
     def set_registration_heartbeat(self, heartbeat: RegistrationHeartbeat) -> None:
         self.registration_heartbeat = heartbeat
 
+    def set_stream_supervisor(self, supervisor: StreamSupervisor) -> None:
+        self.stream_supervisor = supervisor
+
     def registration_heartbeat_health(self) -> dict[str, Any]:
         if self.registration_heartbeat:
             return self.registration_heartbeat.snapshot()
@@ -1568,6 +1738,22 @@ class AgentState:
             "lastSuccessAt": None,
             "lastFailureAt": None,
             "consecutiveFailures": 0,
+            "lastError": None,
+        }
+
+    def stream_supervisor_health(self) -> dict[str, Any]:
+        if self.stream_supervisor:
+            return self.stream_supervisor.snapshot()
+        return {
+            "owner": False,
+            "enabled": False,
+            "configured": False,
+            "running": False,
+            "pid": None,
+            "restartCount": 0,
+            "lastStartedAt": None,
+            "lastExitAt": None,
+            "lastExitCode": None,
             "lastError": None,
         }
 
@@ -1647,6 +1833,7 @@ class Handler(BaseHTTPRequestHandler):
                     "conptyAvailable": conpty_available(),
                     "pywinptyAvailable": pywinpty_available(),
                     "heartbeat": self.state.registration_heartbeat_health(),
+                    "stream": self.state.stream_supervisor_health(),
                 }
             )
             return
@@ -1817,18 +2004,22 @@ def main() -> int:
     Handler.state = AgentState(config)
     server = ThreadingHTTPServer((host, port), Handler)
     registration_heartbeat = RegistrationHeartbeat(config, args.config, int(server.server_address[1]))
+    stream_supervisor = StreamSupervisor(config, args.config)
     Handler.state.set_registration_heartbeat(registration_heartbeat)
+    Handler.state.set_stream_supervisor(stream_supervisor)
     Handler.state.set_shutdown_callback(lambda: threading.Thread(target=server.shutdown, daemon=True).start())
     if registration_heartbeat.owner:
         retire_legacy_heartbeat_task(config)
     if registration_heartbeat.enabled:
         registration_heartbeat.start()
+    stream_supervisor.start()
     print(f"{program}: listening on http://{host}:{port}", file=sys.stderr)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         return 0
     finally:
+        stream_supervisor.stop()
         registration_heartbeat.stop()
         server.server_close()
     return AGENT_RESTART_EXIT_CODE if Handler.state.restart_requested else 0

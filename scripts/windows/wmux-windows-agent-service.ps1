@@ -12,6 +12,7 @@ $RestartTaskName = "$TaskName-update"
 $OutLog = Join-Path $LogDir 'windows-agent.out.log'
 $ErrLog = Join-Path $LogDir 'windows-agent.err.log'
 $LegacyHeartbeatTaskName = if ($env:WMUX_HEARTBEAT_TASK) { $env:WMUX_HEARTBEAT_TASK } else { 'wmux-heartbeat' }
+$LegacyStreamTaskName = if ($env:WMUX_STREAM_AGENT_TASK) { $env:WMUX_STREAM_AGENT_TASK } else { 'wmux-stream-agent' }
 $Force = @($args) -contains '--force'
 $GenerationPort = 0
 for ($Index = 0; $Index -lt $args.Count - 1; $Index += 1) {
@@ -118,6 +119,19 @@ function Remove-LegacyHeartbeatTask {
       $_.ProcessId -ne $PID -and
       $_.CommandLine -and
       $_.CommandLine -like '*wmux-heartbeat*.ps1*'
+    } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+}
+
+function Remove-LegacyStreamTask {
+  Stop-ScheduledTask -TaskName $LegacyStreamTaskName -ErrorAction SilentlyContinue
+  Unregister-ScheduledTask -TaskName $LegacyStreamTaskName -Confirm:$false -ErrorAction SilentlyContinue
+  Get-CimInstance Win32_Process |
+    Where-Object {
+      $_.ProcessId -ne $PID -and
+      $_.CommandLine -and
+      $_.CommandLine -like '*wmux-stream-agent.py*' -and
+      $_.CommandLine -notlike '*wmux-windows-agent.py*'
     } |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 }
@@ -247,6 +261,7 @@ function Start-AgentGeneration {
   # must not race the same registry record from adjacent callback ports.
   $Document | Add-Member -NotePropertyName heartbeatEnabled -NotePropertyValue $false -Force
   $Document | Add-Member -NotePropertyName heartbeatOwner -NotePropertyValue $false -Force
+  $Document | Add-Member -NotePropertyName streamOwner -NotePropertyValue $false -Force
   [System.IO.File]::WriteAllText(
     $GenerationConfig,
     ($Document | ConvertTo-Json -Depth 20),
@@ -445,6 +460,7 @@ switch ($ActionName) {
       Write-Error "wmux-windows-agent was not found at $Agent"
       exit 127
     }
+    Remove-LegacyStreamTask
     Write-Wrapper
     $TaskAction = New-HiddenPowerShellAction
     $TaskTrigger = New-WmuxTaskTriggers
@@ -575,7 +591,7 @@ Start-ScheduledTask -TaskName '$($TaskName -replace "'", "''")'
     Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop | Format-List *
     Get-ScheduledTaskInfo -TaskName $TaskName -ErrorAction SilentlyContinue | Format-List *
     try {
-      Invoke-AgentRequest -Method GET -Path '/health' | Select-Object version, releaseVersion, protocolVersion, backend, processTree, activeSessions, draining, restartWhenIdle, heartbeat | Format-List
+      Invoke-AgentRequest -Method GET -Path '/health' | Select-Object version, releaseVersion, protocolVersion, backend, processTree, activeSessions, draining, restartWhenIdle, heartbeat, stream | Format-List
     } catch {
       Write-Warning "Agent health unavailable: $($_.Exception.Message)"
     }

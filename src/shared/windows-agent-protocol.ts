@@ -1,8 +1,9 @@
-export const WINDOWS_AGENT_PROTOCOL_VERSION = 5;
+export const WINDOWS_AGENT_PROTOCOL_VERSION = 6;
 
 export const WINDOWS_AGENT_CAPABILITIES = [
   "paste-images-v1",
   "registration-heartbeat-v1",
+  "stream-supervision-v1",
 ] as const;
 
 export const WINDOWS_AGENT_PATHS = {
@@ -37,6 +38,19 @@ export interface WindowsAgentHeartbeatHealth {
   lastError?: string | null;
 }
 
+export interface WindowsAgentStreamHealth {
+  owner?: boolean;
+  enabled?: boolean;
+  configured?: boolean;
+  running?: boolean;
+  pid?: number | null;
+  restartCount?: number;
+  lastStartedAt?: string | null;
+  lastExitAt?: string | null;
+  lastExitCode?: number | null;
+  lastError?: string | null;
+}
+
 export interface WindowsAgentHealth {
   ok?: boolean;
   releaseVersion?: string;
@@ -56,6 +70,7 @@ export interface WindowsAgentHealth {
   pywinptyAvailable?: boolean;
   capabilities?: string[];
   heartbeat?: WindowsAgentHeartbeatHealth;
+  stream?: WindowsAgentStreamHealth;
 }
 
 export interface WindowsAgentSessionResponse {

@@ -183,7 +183,7 @@ const windowsBackendDetail = (health: Record<string, unknown>): string => {
       : health.helpersCurrent === false
         ? "helpers stale (respawn a pane to restage)"
         : "helpers ready";
-  const streamTask = typeof health.streamTaskState === "string" ? `stream task ${health.streamTaskState}` : "stream task unknown";
+  const streamTask = typeof health.streamTaskState === "string" ? `stream supervisor ${health.streamTaskState}` : "stream supervisor unknown";
   const agentTask = typeof health.agentTaskState === "string" ? `agent task ${health.agentTaskState}` : "agent task unknown";
   const sunshine =
     health.sunshine === true
