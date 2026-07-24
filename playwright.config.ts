@@ -40,6 +40,7 @@ export default defineConfig({
       WMUX_DISABLE_AUTH: "1",
       WMUX_REGISTRATION_TOKEN: "e2e-registration-token",
       WMUX_CONFIG_PATH: runtimeConfigPath,
+      WMUX_MANAGED_CONFIG_PATH: path.join(runtimeDir, "managed-config.json"),
       WMUX_STATE_PATH: path.join(runtimeDir, "state.json"),
       WMUX_SETTINGS_PATH: path.join(runtimeDir, "settings.json"),
       WMUX_AGENT_TIMELINE_PATH: path.join(runtimeDir, "agent-timelines.json"),

@@ -31,6 +31,7 @@ import { installWebSocketUpgrade } from "./ws-upgrade.js";
 import type { StateStore } from "./state.js";
 import type { SessionManager } from "./session-manager.js";
 import type { SettingsStore } from "./settings.js";
+import type { StaticMachineStore } from "./static-machine-store.js";
 import { HttpError, type ServerDeps } from "./routes/route.js";
 import { clientRoot } from "./static-files.js";
 
@@ -56,6 +57,7 @@ export const createHttpServer = (
     auth: AuthConfig;
     tls?: https.ServerOptions;
     hostRegistry?: HostRegistry;
+    staticMachines?: StaticMachineStore;
     registrationToken?: string;
     trustedProxies?: ReadonlySet<string>;
     terminalFontFamily?: string;
@@ -77,7 +79,12 @@ export const createHttpServer = (
     browserSessionCookieSecure?: boolean;
   },
 ): Promise<WmuxHttpServer> => {
-  const { auth, hostRegistry, registrationToken } = options;
+  const {
+    auth,
+    hostRegistry,
+    registrationToken,
+    staticMachines,
+  } = options;
   const machineStatusResolver = options.healthResolvers?.machines ?? resolveMachineStatuses;
   const streamStatusResolver = options.healthResolvers?.streams ?? resolveStreamStatuses;
   const trustedProxies = options.trustedProxies ?? new Set<string>();
@@ -149,6 +156,7 @@ export const createHttpServer = (
     state,
     sessions,
     settings,
+    staticMachines,
     hostRegistry,
     streamRequests,
     repositoryReviews,

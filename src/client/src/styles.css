@@ -4936,6 +4936,213 @@ button.active-tool {
   color: #d98a7e;
 }
 
+.machine-manager-panel {
+  width: min(1040px, calc(100vw - 32px));
+  max-height: min(820px, calc(100vh - 32px));
+}
+
+.machine-manager-body {
+  grid-template-columns: minmax(210px, 0.7fr) minmax(420px, 1.6fr);
+  align-content: start;
+}
+
+.machine-manager-list,
+.machine-manager-editor,
+.machine-manager-registered {
+  min-width: 0;
+  border: 1px solid var(--line);
+  padding: 10px;
+}
+
+.machine-manager-registered {
+  grid-column: 1 / -1;
+}
+
+.machine-manager-list .settings-command-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.machine-manager-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px;
+  min-width: 0;
+  border: 1px solid rgba(212, 180, 95, 0.15);
+}
+
+.machine-manager-item + .machine-manager-item {
+  border-top: 0;
+}
+
+.machine-manager-item.selected {
+  border-color: var(--gold);
+  background: rgba(212, 180, 95, 0.08);
+}
+
+.machine-manager-item > button:first-child {
+  display: grid;
+  justify-items: start;
+  min-width: 0;
+  height: auto;
+  border: 0;
+  background: transparent;
+  padding: 7px 8px;
+  text-align: left;
+}
+
+.machine-manager-item > button:last-child {
+  width: 28px;
+  min-width: 28px;
+  height: 100%;
+  border-width: 0 0 0 1px;
+}
+
+.machine-manager-item span,
+.machine-manager-registration strong {
+  overflow: hidden;
+  color: var(--ivory);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.machine-manager-item small,
+.machine-manager-registration small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.machine-manager-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.machine-manager-form {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.machine-manager-fields label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.machine-manager-field-wide {
+  grid-column: 1 / -1;
+}
+
+.machine-manager-fields label > span,
+.settings-checkbox-row span {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.machine-manager-fields input,
+.machine-manager-fields select,
+.machine-manager-fields textarea {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  color: var(--ivory);
+  background: var(--panel-2);
+  padding: 6px 8px;
+  font: inherit;
+}
+
+.machine-manager-fields input,
+.machine-manager-fields select {
+  height: 30px;
+  padding-block: 0;
+}
+
+.machine-manager-fields textarea {
+  resize: vertical;
+}
+
+.settings-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.machine-manager-secret-state {
+  border-left: 2px solid var(--gold);
+  color: var(--muted);
+  padding: 6px 8px;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.machine-manager-registration {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto 28px;
+  align-items: stretch;
+  min-width: 0;
+  border: 1px solid rgba(212, 180, 95, 0.15);
+}
+
+.machine-manager-registration + .machine-manager-registration {
+  border-top: 0;
+}
+
+.machine-manager-registration.disabled {
+  opacity: 0.62;
+}
+
+.machine-manager-registration > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 7px 8px;
+}
+
+.machine-manager-registration input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  border-radius: 0;
+  color: var(--ivory);
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.machine-manager-registration input:focus {
+  border-bottom-color: var(--gold);
+  outline: 0;
+}
+
+.machine-manager-registration > button {
+  height: 100%;
+  min-height: 38px;
+  border-width: 0 0 0 1px;
+}
+
+.machine-manager-error {
+  border-top: 1px solid var(--line);
+  padding: 7px 14px;
+}
+
 .session-audit {
   display: grid;
   gap: 4px;
@@ -6354,6 +6561,30 @@ button.active-tool {
   .settings-body {
     overscroll-behavior: contain;
     padding: 12px;
+  }
+
+  .machine-manager-body,
+  .machine-manager-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .machine-manager-field-wide {
+    grid-column: auto;
+  }
+
+  .machine-manager-registered {
+    grid-column: auto;
+  }
+
+  .machine-manager-registration {
+    grid-template-columns: minmax(0, 1fr) 44px 76px 44px;
+  }
+
+  .machine-manager-registration > button {
+    min-width: 44px;
+    overflow: hidden;
+    padding: 0 5px;
+    font-size: 9px;
   }
 
   .settings-row input,

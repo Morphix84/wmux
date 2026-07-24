@@ -17,7 +17,7 @@ export const MAX_HOSTS_PER_ADDRESS = 32;
 export const MAX_METADATA_BYTES = 16 * 1024;
 export const MIN_REGISTRATION_INTERVAL_MS = 5_000;
 export const BOOTSTRAP_TOKEN_GRACE_MS = 30_000;
-export const CURRENT_HOST_REGISTRY_SCHEMA_VERSION = 1;
+export const CURRENT_HOST_REGISTRY_SCHEMA_VERSION = 2;
 
 const defaultPath = (): string => path.join(os.homedir(), ".wmux", "host-registry.json");
 const portSchema = z.number().int().min(1).max(65_535);
@@ -129,6 +129,8 @@ const persistedRecordFields = {
   observedAddress: z.string().refine(isAllowedRegistrationAddress, "invalid observed address"),
   previousBootstrapToken: z.string().regex(/^[A-Za-z0-9_-]{32,128}$/).optional(),
   previousBootstrapTokenExpiresAt: z.string().datetime().optional(),
+  nameOverride: machineNameSchema.optional(),
+  disabled: z.boolean().optional(),
   metadata: metadataSchema.optional(),
 };
 
@@ -180,12 +182,14 @@ interface RegisteredHostRecord {
   bootstrapToken: string;
   previousBootstrapToken?: string;
   previousBootstrapTokenExpiresAt?: string;
+  nameOverride?: string;
+  disabled?: boolean;
   metadata?: Record<string, string | number | boolean | null>;
 }
 
 export interface RegisteredHostSnapshot extends Omit<
   RegisteredHostRecord,
-  "machine" | "bootstrapToken" | "previousBootstrapToken" | "previousBootstrapTokenExpiresAt"
+  "machine" | "bootstrapToken" | "previousBootstrapToken" | "previousBootstrapTokenExpiresAt" | "nameOverride"
 > {
   machine: PublicRegisteredMachineConfig;
   active: boolean;
@@ -203,11 +207,12 @@ export class HostRegistryError extends Error {
 
 export class HostRegistry extends EventEmitter {
   private readonly staticIds: Set<string>;
+  private staticMachines: MachineConfig[];
   private readonly hosts = new Map<string, RegisteredHostRecord>();
   private expiryTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
-    private readonly staticMachines: MachineConfig[],
+    staticMachines: MachineConfig[],
     private readonly filePath: string = process.env.WMUX_REGISTRY_PATH ?? defaultPath(),
     private readonly retentionMs = DEFAULT_HOST_RETENTION_MS,
     private readonly shouldRetain: (machineId: string) => boolean = () => false,
@@ -215,6 +220,7 @@ export class HostRegistry extends EventEmitter {
     private readonly hasLiveSession: (machineId: string) => boolean = () => false,
   ) {
     super();
+    this.staticMachines = structuredClone(staticMachines);
     this.staticIds = new Set(["local", ...staticMachines.map((machine) => machine.id)]);
     this.load();
     this.prune();
@@ -230,6 +236,38 @@ export class HostRegistry extends EventEmitter {
 
   snapshot(nowMs = Date.now()): RegisteredHostSnapshot[] {
     return [...this.hosts.values()].map((record) => this.publicRecord(record, nowMs));
+  }
+
+  updateStaticMachines(machines: MachineConfig[]): void {
+    this.staticMachines = structuredClone(machines);
+    this.staticIds.clear();
+    this.staticIds.add("local");
+    for (const machine of machines) this.staticIds.add(machine.id);
+    this.emit("change");
+  }
+
+  updateRegistration(
+    id: string,
+    input: { name?: unknown; disabled?: unknown },
+  ): RegisteredHostSnapshot {
+    const record = this.hosts.get(id);
+    if (!record) throw new HostRegistryError(404, "unknown_registered_host");
+    if (input.name !== undefined) {
+      const parsed = machineNameSchema.safeParse(input.name);
+      if (!parsed.success) throw new HostRegistryError(400, "invalid_registration_update");
+      record.nameOverride = parsed.data;
+      record.machine.name = parsed.data;
+    }
+    if (input.disabled !== undefined) {
+      if (typeof input.disabled !== "boolean") {
+        throw new HostRegistryError(400, "invalid_registration_update");
+      }
+      record.disabled = input.disabled;
+    }
+    this.persist();
+    this.scheduleNextChange();
+    this.emit("change");
+    return this.publicRecord(record, Date.now());
   }
 
   bootstrapToken(machineId: string): string | undefined {
@@ -266,6 +304,7 @@ export class HostRegistry extends EventEmitter {
     const now = new Date(nowMs).toISOString();
     const ttlMs = parsed.data.ttlMs ?? DEFAULT_HOST_TTL_MS;
     const previous = this.hosts.get(machine.id);
+    if (previous?.nameOverride) machine.name = previous.nameOverride;
     if (!previous && this.hosts.size >= MAX_REGISTERED_HOSTS) {
       throw new HostRegistryError(429, "registry_capacity");
     }
@@ -320,7 +359,9 @@ export class HostRegistry extends EventEmitter {
         : previous
           ? new Date(nowMs + BOOTSTRAP_TOKEN_GRACE_MS).toISOString()
           : undefined,
+      nameOverride: previous?.nameOverride,
       metadata: parsed.data.metadata ?? (connectionUnchanged ? previous?.metadata : undefined),
+      disabled: previous?.disabled,
     };
     this.hosts.set(record.id, record);
     this.persist();
@@ -372,6 +413,7 @@ export class HostRegistry extends EventEmitter {
       if (
         rawVersion !== undefined &&
         rawVersion !== 0 &&
+        rawVersion !== 1 &&
         rawVersion !== CURRENT_HOST_REGISTRY_SCHEMA_VERSION
       ) {
         throw new Error("host registry schemaVersion must be a supported integer");
@@ -397,9 +439,11 @@ export class HostRegistry extends EventEmitter {
         if (!migrated && loadedHosts.has(record.id)) {
           throw new InvalidHostRegistryError(`duplicate machine id: ${record.id}`);
         }
+        const machine = this.sanitizeMachine(record.machine);
+        if (record.nameOverride) machine.name = record.nameOverride;
         loadedHosts.set(record.id, {
           id: record.id,
-          machine: this.sanitizeMachine(record.machine),
+          machine,
           registeredAt: record.registeredAt,
           lastSeenAt: record.lastSeenAt,
           expiresAt: record.expiresAt,
@@ -409,6 +453,8 @@ export class HostRegistry extends EventEmitter {
           bootstrapToken: record.bootstrapToken ?? crypto.randomBytes(32).toString("base64url"),
           previousBootstrapToken: record.previousBootstrapToken,
           previousBootstrapTokenExpiresAt: record.previousBootstrapTokenExpiresAt,
+          nameOverride: record.nameOverride,
+          disabled: record.disabled,
           metadata: record.metadata,
         });
       }
@@ -490,6 +536,7 @@ export class HostRegistry extends EventEmitter {
   }
 
   private isActive(record: RegisteredHostRecord, nowMs: number): boolean {
+    if (record.disabled) return false;
     const expiresAt = Date.parse(record.expiresAt);
     return Number.isFinite(expiresAt) && expiresAt > nowMs;
   }
@@ -518,6 +565,7 @@ export class HostRegistry extends EventEmitter {
       bootstrapToken: _bootstrapToken,
       previousBootstrapToken: _previousBootstrapToken,
       previousBootstrapTokenExpiresAt: _previousBootstrapTokenExpiresAt,
+      nameOverride: _nameOverride,
       ...publicRecord
     } = record;
     return {

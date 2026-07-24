@@ -29,6 +29,7 @@ export default defineConfig({
       HOME: runtime.home,
       WMUX_BROWSER_AUTH_MODE: "login-only",
       WMUX_CONFIG_PATH: path.resolve("e2e", "fixtures", "wmux.config.json"),
+      WMUX_MANAGED_CONFIG_PATH: path.join(runtime.directory, "managed-config.json"),
       WMUX_STATE_PATH: path.join(runtime.directory, "state.json"),
       WMUX_SETTINGS_PATH: path.join(runtime.directory, "settings.json"),
       WMUX_AGENT_TIMELINE_PATH: path.join(runtime.directory, "agent-timelines.json"),

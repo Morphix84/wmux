@@ -518,20 +518,66 @@ test("the semantic local machine id stays reserved without a static local machin
   }
 });
 
-test("registrations survive restart and can be removed", () => {
+test("registration labels and disabled state survive heartbeats and restart", () => {
   const { dir, filePath } = tempRegistry();
   const first = new HostRegistry(staticMachines, filePath);
-  first.register({ machine: { id: "durable", name: "Durable", kind: "ssh" } }, "100.70.0.7");
+  const now = Date.now();
+  first.register(
+    { machine: { id: "durable", name: "Durable", kind: "ssh" } },
+    "100.70.0.7",
+    now,
+  );
+  first.updateRegistration("durable", { name: "Durable renamed", disabled: true });
+  first.register(
+    { machine: { id: "durable", name: "Heartbeat label", kind: "ssh" } },
+    "100.70.0.7",
+    now + MIN_REGISTRATION_INTERVAL_MS,
+  );
   first.dispose();
 
   const second = new HostRegistry(staticMachines, filePath);
   try {
     assert.equal(second.machines()[1].host, "100.70.0.7");
+    assert.equal(second.machines()[1].name, "Durable renamed");
+    assert.equal(second.snapshot()[0].machine.name, "Durable renamed");
+    assert.equal("nameOverride" in second.snapshot()[0], false);
+    assert.equal(second.machines()[1].online, false);
+    assert.equal(second.snapshot()[0].disabled, true);
     assert.equal(second.unregister("durable"), true);
     assert.equal(second.unregister("durable"), false);
     assert.deepEqual(second.machines().map((machine) => machine.id), ["local"]);
   } finally {
     second.dispose();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("schema version 1 registries migrate without inventing disabled state", () => {
+  const { dir, filePath } = tempRegistry();
+  const first = new HostRegistry(staticMachines, filePath);
+  first.register(
+    { machine: { id: "version-one", name: "Version one", kind: "ssh" } },
+    "100.70.0.8",
+  );
+  first.dispose();
+
+  const document = JSON.parse(fs.readFileSync(filePath, "utf8")) as {
+    schemaVersion: number;
+    hosts: Array<Record<string, unknown>>;
+  };
+  document.schemaVersion = 1;
+  for (const host of document.hosts) delete host.disabled;
+  fs.writeFileSync(filePath, `${JSON.stringify(document, null, 2)}\n`);
+
+  const migrated = new HostRegistry(staticMachines, filePath);
+  try {
+    assert.equal(migrated.snapshot()[0].disabled, undefined);
+    assert.equal(
+      (JSON.parse(fs.readFileSync(filePath, "utf8")) as { schemaVersion: number }).schemaVersion,
+      CURRENT_HOST_REGISTRY_SCHEMA_VERSION,
+    );
+  } finally {
+    migrated.dispose();
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });

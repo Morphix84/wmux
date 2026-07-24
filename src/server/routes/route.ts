@@ -8,6 +8,7 @@ import type { LoginAttemptThrottle } from "../login-throttle.js";
 import type { RepositoryReviewService } from "../repository-review.js";
 import type { SessionManager } from "../session-manager.js";
 import type { SettingsStore } from "../settings.js";
+import type { StaticMachineStore } from "../static-machine-store.js";
 import type { StateStore } from "../state.js";
 import type { StreamRequestStore } from "../streams.js";
 import type {
@@ -50,6 +51,7 @@ export interface ServerDeps {
   state: StateStore;
   sessions: SessionManager;
   settings: SettingsStore;
+  staticMachines?: StaticMachineStore;
   hostRegistry?: HostRegistry;
   streamRequests: StreamRequestStore;
   repositoryReviews: RepositoryReviewService;

@@ -41,6 +41,7 @@ interface OpenTuiSettingsModalProps {
   onApplyDraft: (settings: WmuxSettings) => void;
   onSave: (settings: WmuxSettings) => void | Promise<void>;
   onCancel: () => void;
+  onManageMachines: () => void;
   onUseDomFallback?: () => void;
   onRunSessionAudit: () => void | Promise<void>;
   onCleanupSession: (backend: "tmux" | "screen", name: string) => void | Promise<void>;
@@ -48,7 +49,7 @@ interface OpenTuiSettingsModalProps {
 
 type FieldId = "font" | "scrollback" | `alias:${string}`;
 type ChoiceId = "scheme" | "inactive-streaming" | "frame-rate" | "terminal-scroll";
-type FocusId = FieldId | ChoiceId | "dom" | "close" | "audit" | "reset" | "cancel" | "save" | `cleanup:${string}:${string}`;
+type FocusId = FieldId | ChoiceId | "manage" | "dom" | "close" | "audit" | "reset" | "cancel" | "save" | `cleanup:${string}:${string}`;
 
 interface EditState {
   id: FieldId;
@@ -166,6 +167,7 @@ export function OpenTuiSettingsModal({
   onApplyDraft,
   onSave,
   onCancel,
+  onManageMachines,
   onUseDomFallback,
   onRunSessionAudit,
   onCleanupSession,
@@ -303,6 +305,11 @@ export function OpenTuiSettingsModal({
   };
 
   const activate = async (id: FocusId) => {
+    if (id === "manage") {
+      commitEditing();
+      onManageMachines();
+      return;
+    }
     if (id === "dom") {
       commitEditing();
       onUseDomFallback?.();
@@ -523,7 +530,7 @@ const buildLayout = (
   sessionAuditLoading: boolean,
 ): SettingsLayout => {
   const items: LayoutItem[] = [];
-  const focusableIds: FocusId[] = ["dom", "close"];
+  const focusableIds: FocusId[] = ["manage", "dom", "close"];
   let row = 0;
 
   const push = (item: LayoutItemInput) => {
@@ -667,6 +674,8 @@ const drawSettings = (
 
   let closeCol = Math.max(2, cols - 7);
   drawButton(grid, 1, closeCol, "X", focusId === "close", hits, "close", "activate", theme);
+  const manageCol = Math.max(2, closeCol - (canUseDomFallback ? 24 : 17));
+  drawButton(grid, 1, manageCol, "MACHINES", focusId === "manage", hits, "manage", "activate", theme);
   if (canUseDomFallback) {
     const domCol = Math.max(2, closeCol - 7);
     drawButton(grid, 1, domCol, "DOM", focusId === "dom", hits, "dom", "activate", theme);
