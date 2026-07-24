@@ -27,7 +27,13 @@ export class DurableMultiplexerBackend extends RawPtyBackend {
     session: BackendSession,
     outputOnly = false,
   ): ReturnType<RawPtyBackend["readReplay"]> {
-    if (!outputOnly && this.capabilities.refreshClient) return { data: "", kind: "raw" };
+    if (
+      !outputOnly
+      && this.capabilities.refreshClient
+      && !session.restoredAttachReplay
+    ) {
+      return { data: "", kind: "raw" };
+    }
     return super.readReplay(session);
   }
 
@@ -73,5 +79,6 @@ export const durableMultiplexerCapabilities = (machine: MachineConfig): BackendC
     cwd: backend === "screen" ? "osc7" : "multiplexer",
     agentOwned: false,
     refreshClient: canRefreshDurableSessionClient(machine),
+    persistentCheckpoint: true,
   };
 };

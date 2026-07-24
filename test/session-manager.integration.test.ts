@@ -596,6 +596,72 @@ test("late attach receives an authoritative checkpoint for a full-screen PTY", {
 });
 
 test(
+  "raw PTY restores its persisted screen checkpoint after manager restart",
+  { skip: process.platform === "win32" },
+  async () => {
+    const directory = fs.mkdtempSync(
+      path.join(os.tmpdir(), "wmux-raw-checkpoint-"),
+    );
+    const machine: MachineConfig = {
+      id: "local",
+      name: "Local",
+      kind: "local",
+      shell: "/bin/sh",
+      sessionBackend: "pty",
+    };
+    const state = new StateStore(
+      [machine],
+      path.join(directory, "state.json"),
+    );
+    const pane = state.snapshot().workspaces[0].tabs[0].panes[0];
+    const firstManager = new SessionManager(state, [machine]);
+    let secondManager: SessionManager | undefined;
+    const first = socket();
+    try {
+      firstManager.attach(pane.id, first, 80, 24);
+      await waitForMessage(first, (message) => message.type === "ready");
+      fake(first).message({
+        type: "input",
+        data: "printf '\\033[?1049h\\033[2J\\033[HWMUX_PERSISTED_SCREEN'\r",
+      });
+      await waitForMessage(
+        first,
+        (message) =>
+          message.type === "output"
+          && message.data.includes("WMUX_PERSISTED_SCREEN"),
+      );
+
+      firstManager.disposeAll();
+      secondManager = new SessionManager(state, [machine]);
+      const second = socket();
+      secondManager.attach(pane.id, second, 92, 28);
+      const ready = await waitForMessage(
+        second,
+        (message) => message.type === "ready",
+      );
+      assert.equal(ready.replayKind, "checkpoint");
+      assert.match(ready.replay, /WMUX_PERSISTED_SCREEN/);
+      assert.equal(
+        secondManager.closeWorkspace(
+          state.snapshot().workspaces[0].id,
+        ),
+        true,
+      );
+      assert.equal(
+        fs.readdirSync(
+          path.join(directory, "pane-checkpoints"),
+        ).some((entry) => entry.endsWith(".json")),
+        false,
+      );
+    } finally {
+      firstManager.disposeAll();
+      secondManager?.disposeAll();
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
   "new and reattached tmux panes synchronize cwd after the durable session is ready",
   { skip: process.platform === "win32" || spawnSync("tmux", ["-V"], { stdio: "ignore" }).status !== 0 },
   async () => {

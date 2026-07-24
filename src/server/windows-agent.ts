@@ -187,6 +187,8 @@ export class WindowsAgentSession extends EventEmitter<AgentEvents> {
   private paused = false;
   private lastTransportWarningAt = 0;
   private agentUrl: string | undefined;
+  private liveResetEmitted = false;
+  private liveOutputObserved = false;
   readonly attachReady: Promise<void>;
   private resolveAttachReady!: () => void;
 
@@ -198,6 +200,7 @@ export class WindowsAgentSession extends EventEmitter<AgentEvents> {
     private readonly extraEnv: Record<string, string> = {},
     private readonly activateUpdate: WindowsAgentUpdateActivator = activateWindowsAgentUpdate,
     private readonly updateRestartTimeoutMs = UPDATE_RESTART_TIMEOUT_MS,
+    private readonly restoredCheckpoint?: AttachReplay,
   ) {
     super();
     this.checkpoint = new TerminalCheckpoint(cols, rows, extraEnv);
@@ -222,7 +225,23 @@ export class WindowsAgentSession extends EventEmitter<AgentEvents> {
   }
 
   get attachReplay(): AttachReplay {
-    return selectAttachReplay(this.replayOutput, this.replayTruncated, this.checkpoint, true);
+    const current = selectAttachReplay(
+      this.replayOutput,
+      this.replayTruncated,
+      this.checkpoint,
+      true,
+    );
+    if (!this.restoredCheckpoint || this.liveOutputObserved) return current;
+    return this.restoredCheckpoint;
+  }
+
+  get restoredAttachReplay(): AttachReplay | undefined {
+    return this.liveOutputObserved ? undefined : this.restoredCheckpoint;
+  }
+
+  get screenCheckpoint(): AttachReplay | undefined {
+    const data = this.checkpoint.snapshot();
+    return data ? { data, kind: "checkpoint" } : undefined;
   }
 
   write(data: string): void {
@@ -322,6 +341,9 @@ export class WindowsAgentSession extends EventEmitter<AgentEvents> {
       this.checkpoint.reframe(replayCols, replayRows);
       if (historyBytes > 0) this.reportPhase("replaying", "Restoring terminal state…");
       await this.hydrateReplay(response.cursor ?? this.cursor);
+      if (historyBytes > 0 && response.cols && response.rows) {
+        this.liveOutputObserved = true;
+      }
       this.ready = true;
       const pendingResize = this.pendingResize;
       this.pendingResize = undefined;
@@ -699,7 +721,16 @@ export class WindowsAgentSession extends EventEmitter<AgentEvents> {
     this.checkpoint.write(data);
     this.appendReplay(data);
     this.captureCwd(data);
-    if (emit) this.emit("output", data);
+    if (emit) {
+      this.emit(
+        "output",
+        this.restoredCheckpoint && !this.liveResetEmitted
+          ? `\x1bc${data}`
+          : data,
+      );
+      this.liveResetEmitted = true;
+      this.liveOutputObserved = true;
+    }
   }
 
   private appendReplay(data: string): void {

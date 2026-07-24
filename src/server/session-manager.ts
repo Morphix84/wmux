@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { WebSocket } from "ws";
 import { isTerminalProtocolResponse } from "../shared/terminal-protocol.js";
 import type { BrowserAuthMode } from "./auth.js";
@@ -12,6 +13,7 @@ import {
 import { streamPathForMachine } from "./streams.js";
 import { resolveHelperUrl } from "./helper-url.js";
 import type { AttachReplay } from "./terminal-checkpoint.js";
+import { TerminalCheckpointStore } from "./terminal-checkpoint-store.js";
 import {
   PasteImageStageError,
   PasteImageStaging,
@@ -120,6 +122,7 @@ export class SessionManager {
   private pausedSessions = new Map<string, ReturnType<typeof setInterval>>();
   private durableRefreshTimers = new Set<ReturnType<typeof setTimeout>>();
   private readonly currentMachines: () => MachineConfig[];
+  private readonly terminalCheckpoints: TerminalCheckpointStore;
 
   constructor(
     private readonly state: StateStore,
@@ -132,8 +135,18 @@ export class SessionManager {
     private readonly helperToken = "",
     private readonly browserAuthMode: BrowserAuthMode = "shared-or-login",
     readonly agentSessions = new AgentSessionService(state),
+    terminalCheckpoints?: TerminalCheckpointStore,
   ) {
     this.currentMachines = typeof machines === "function" ? machines : () => machines;
+    this.terminalCheckpoints = terminalCheckpoints
+      ?? new TerminalCheckpointStore(
+        process.env.WMUX_TERMINAL_CHECKPOINT_DIR
+          ?? path.join(state.storageDirectory(), "pane-checkpoints"),
+      );
+    this.terminalCheckpoints.prune(new Set(
+      state.snapshot().workspaces.flatMap((workspace) =>
+        workspace.tabs.flatMap((tab) => tab.panes.map((pane) => pane.id))),
+    ));
   }
 
   hasLiveSessionsForMachine(machineId: string): boolean {
@@ -228,7 +241,9 @@ export class SessionManager {
           this.releaseResizeOwner(paneId, socket);
           return;
         }
-        if (this.resizeOwners.get(paneId) === socket) this.backends.get(paneId)?.resize(session, size.cols, size.rows);
+        if (this.resizeOwners.get(paneId) === socket) {
+          this.backends.get(paneId)?.resize(session, size.cols, size.rows);
+        }
       }
       if (message.type === "activate") {
         const size = normalizeSize(message.cols, message.rows);
@@ -401,7 +416,16 @@ export class SessionManager {
       WMUX_STREAM_WHIP_URL: `${process.env.WMUX_MEDIAMTX_WEBRTC_ORIGIN ?? `http://${streamHost}:8889`}/${streamPath}/whip`,
       KITTY_WINDOW_ID: `wmux-${pane.id}`,
     };
-    const session = backend.spawn({ pane, cols, rows, env: sessionEnv });
+    const restoredCheckpoint = backend.capabilities.persistentCheckpoint
+      ? this.terminalCheckpoints.load(pane.id, backend.id)
+      : undefined;
+    const session = backend.spawn({
+      pane,
+      cols,
+      rows,
+      env: sessionEnv,
+      ...(restoredCheckpoint ? { restoredCheckpoint } : {}),
+    });
     const startedAt = Date.now();
     this.sessions.set(pane.id, session);
     this.backends.set(pane.id, backend);
@@ -412,6 +436,7 @@ export class SessionManager {
     session.on("output", (data) => {
       this.broadcastOutput(pane.id, data);
       this.applyBackpressure(pane.id, session);
+      this.scheduleTerminalCheckpoint(pane.id, session);
     });
     session.on("title", (title) => {
       this.state.updatePane(pane.id, { title });
@@ -432,12 +457,28 @@ export class SessionManager {
     session.on("exit", (code) => {
       if (this.ignoredSessionExits.has(session)) return;
       this.broadcast(pane.id, { type: "exit", paneId: pane.id, code });
+      const uptimeMs = Date.now() - startedAt;
+      if (!isDeliberateExit(code, uptimeMs)) {
+        const backend = this.backends.get(pane.id);
+        if (backend?.capabilities.persistentCheckpoint) {
+          try {
+            this.terminalCheckpoints.save(
+              pane.id,
+              backend.id,
+              backend.checkpoint(session),
+            );
+          } catch (error) {
+            console.warn(
+              `wmux: failed to persist final terminal checkpoint for ${pane.id}: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+        }
+      }
       this.sessions.delete(pane.id);
       this.resizeOwners.delete(pane.id);
       const context = this.state.findPaneContext(pane.id);
       if (!context) return;
 
-      const uptimeMs = Date.now() - startedAt;
       if (!isDeliberateExit(code, uptimeMs)) {
         // Spawn/connection failure or a very fast exit: preserve the pane so a
         // flaky SSH host or transient error never deletes the workspace. The
@@ -451,6 +492,7 @@ export class SessionManager {
       if (exitedBackend?.capabilities.agentOwned) {
         void exitedBackend.dispose(pane.id, undefined, { kill: false });
       }
+      this.terminalCheckpoints.delete(pane.id);
       this.backends.delete(pane.id);
       this.sessionMachines.delete(pane.id);
       this.paneInputEpochs.delete(pane.id);
@@ -553,6 +595,13 @@ export class SessionManager {
 
   /** Detach every live client and clear timers. Called on process shutdown. */
   disposeAll(): void {
+    try {
+      this.terminalCheckpoints.flush();
+    } catch (error) {
+      console.warn(
+        `wmux: failed to flush terminal checkpoints during shutdown: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
     for (const timer of this.durableRefreshTimers) clearTimeout(timer);
     this.durableRefreshTimers.clear();
     for (const timer of this.pausedSessions.values()) clearInterval(timer);
@@ -677,7 +726,13 @@ export class SessionManager {
 
     const nextSize = this.socketState.get(nextSocket);
     this.resizeOwners.set(paneId, nextSocket);
-    if (nextSize && !session.isExited) this.backends.get(paneId)?.resize(session, nextSize.cols, nextSize.rows);
+    if (nextSize && !session.isExited) {
+      this.backends.get(paneId)?.resize(
+        session,
+        nextSize.cols,
+        nextSize.rows,
+      );
+    }
   }
 
   private deleteEmptySocketSet(paneId: string): void {
@@ -693,6 +748,7 @@ export class SessionManager {
     this.sessionMachines.delete(paneId);
     this.paneInputEpochs.delete(paneId);
     this.resizeOwners.delete(paneId);
+    this.terminalCheckpoints.delete(paneId);
     const fallbackMachineId = machineId ?? session?.pane.machineId ?? this.state.findPane(paneId)?.machineId;
     const machine = resolveDisposalMachine(sessionMachine, this.currentMachines(), fallbackMachineId);
     if (backend) {
@@ -713,6 +769,22 @@ export class SessionManager {
     }
     this.sockets.delete(paneId);
     this.outputWatchers.delete(paneId);
+  }
+
+  private scheduleTerminalCheckpoint(
+    paneId: string,
+    session: BackendSession,
+  ): void {
+    const backend = this.backends.get(paneId);
+    if (!backend?.capabilities.persistentCheckpoint) return;
+    this.terminalCheckpoints.schedule(
+      paneId,
+      backend.id,
+      () =>
+        this.sessions.get(paneId) === session && !session.isExited
+          ? backend.checkpoint(session)
+          : undefined,
+    );
   }
 
   private machineIdsForTab(workspaceId: string, tabId: string): Map<string, string> {

@@ -753,6 +753,8 @@ Delegation records are independent of pane and workspace cleanup.
 Agent turn history is stored separately in `~/.wmux/agent-timelines.json` with the same schema-versioned, atomic, owner-only, rolling-backup discipline.
 Set `WMUX_AGENT_TIMELINE_PATH` to override that location.
 Working-tree snapshots linked from a timeline are archived as owner-only versioned files under `~/.wmux/repository-snapshots/`.
+Each pane's current VT screen is stored under `~/.wmux/pane-checkpoints/` as a bounded, versioned, owner-only ANSI checkpoint with an atomic rolling backup.
+Set `WMUX_TERMINAL_CHECKPOINT_DIR` to override that directory.
 
 | Backend | Survives browser refresh | Survives wmux restart |
 | --- | --- | --- |
@@ -761,11 +763,11 @@ Working-tree snapshots linked from a timeline are archived as owner-only version
 | Plain PowerShell-over-SSH | Yes | No |
 | Windows session agent | Yes | Yes, while the agent remains running |
 
-Each live pane also has bounded raw replay and an in-memory terminal checkpoint
-for alternate-screen or truncated-history reconnects. The current Windows
-agent records resize boundaries with its replay, allowing wmux to rebuild a
-correctly sized checkpoint after a service restart. Other checkpoints remain
-in-memory only; durable multiplexers redraw when wmux reattaches.
+Each live pane also has bounded in-memory raw replay for scrollback-preserving reconnects.
+The current VT screen checkpoint is persisted on a debounce and restored as the attach shield after a wmux restart for every backend that declares checkpoint persistence.
+This restores screen state only.
+Raw PTY and legacy PowerShell processes remain non-durable, scrollback transcripts remain intentionally unpersisted, and durable multiplexers still redraw from their live session after wmux reattaches.
+The current Windows agent continues to record byte-exact resize boundaries so live replay can replace the restored shield at the correct dimensions.
 
 Explicitly closing a pane, tab, or workspace kills its backing session. Audit
 local wmux-owned multiplexer sessions with:

@@ -25,6 +25,7 @@ export const rawPtyCapabilities = (machine: MachineConfig): BackendCapabilities 
   cwd: "osc7",
   agentOwned: false,
   refreshClient: false,
+  persistentCheckpoint: true,
 });
 
 export class RawPtyBackend implements SessionBackend {
@@ -39,7 +40,14 @@ export class RawPtyBackend implements SessionBackend {
   }
 
   spawn(spec: BackendSpawnSpec): BackendSession {
-    return new PtySession(spec.pane, this.machine, spec.cols, spec.rows, spec.env);
+    return new PtySession(
+      spec.pane,
+      this.machine,
+      spec.cols,
+      spec.rows,
+      spec.env,
+      spec.restoredCheckpoint,
+    );
   }
 
   attach(session: BackendSession): Promise<void> | void {
@@ -61,7 +69,7 @@ export class RawPtyBackend implements SessionBackend {
   }
 
   checkpoint(session: BackendSession): ReturnType<SessionBackend["checkpoint"]> {
-    return session.attachReplay;
+    return session.screenCheckpoint ?? session.attachReplay;
   }
 
   async stageFile(paneId: string, data: Buffer, _metadata: StageFileMetadata): Promise<StagedPasteImage> {

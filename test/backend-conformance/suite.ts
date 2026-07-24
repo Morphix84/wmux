@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import type { SessionBackend, BackendSession } from "../../src/server/backends/backend.js";
+import type { AttachReplay } from "../../src/server/terminal-checkpoint.js";
 import type { PaneState } from "../../src/server/types.js";
 
 const OUTPUT_DEADLINE_MS = 5_000;
@@ -60,12 +61,14 @@ const pane = (id: string, machineId: string): PaneState => ({
 const spawn = async (
   backend: SessionBackend,
   paneId: string,
+  restoredCheckpoint?: AttachReplay,
 ): Promise<{ session: BackendSession; output: OutputProbe }> => {
   const session = backend.spawn({
     pane: pane(paneId, backend.machine.id),
     cols: 80,
     rows: 24,
     env: { TERM: "xterm-256color" },
+    ...(restoredCheckpoint ? { restoredCheckpoint } : {}),
   });
   const output = new OutputProbe(session);
   await backend.attach(session);
@@ -137,6 +140,20 @@ export const exerciseBackendConformance = async (
     );
     await output.waitFor("WMUX_ALT_SCREEN", baseline);
     assert.equal(backend.checkpoint(session)?.kind, "checkpoint");
+    if (backend.capabilities.persistentCheckpoint) {
+      const persistedCheckpoint = backend.checkpoint(session);
+      assert.ok(persistedCheckpoint);
+      backend.detach(session);
+      const restarted = await spawn(
+        backend,
+        paneId,
+        persistedCheckpoint,
+      );
+      session = restarted.session;
+      const restoredReplay = backend.readReplay(session);
+      assert.equal(restoredReplay.kind, "checkpoint");
+      assert.match(restoredReplay.data, /WMUX_ALT_SCREEN/);
+    }
     backend.write(
       session,
       windows ? "[Console]::Out.Write(\"`e[?1049l\")\r" : "printf '\\033[?1049l'\r",

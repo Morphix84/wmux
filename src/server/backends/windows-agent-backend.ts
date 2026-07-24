@@ -22,6 +22,7 @@ export const WINDOWS_AGENT_CAPABILITIES: BackendCapabilities = {
   cwd: "agent",
   agentOwned: true,
   refreshClient: false,
+  persistentCheckpoint: true,
 };
 
 export class WindowsAgentBackend implements SessionBackend {
@@ -34,7 +35,16 @@ export class WindowsAgentBackend implements SessionBackend {
   ) {}
 
   spawn(spec: BackendSpawnSpec): BackendSession {
-    return new WindowsAgentSession(spec.pane, this.machine, spec.cols, spec.rows, spec.env);
+    return new WindowsAgentSession(
+      spec.pane,
+      this.machine,
+      spec.cols,
+      spec.rows,
+      spec.env,
+      undefined,
+      undefined,
+      spec.restoredCheckpoint,
+    );
   }
 
   attach(session: BackendSession): Promise<void> | void {
@@ -56,7 +66,7 @@ export class WindowsAgentBackend implements SessionBackend {
   }
 
   checkpoint(session: BackendSession): ReturnType<SessionBackend["checkpoint"]> {
-    return session.attachReplay;
+    return session.screenCheckpoint ?? session.attachReplay;
   }
 
   stageFile(paneId: string, data: Buffer, _metadata: StageFileMetadata): Promise<StagedPasteImage> {
