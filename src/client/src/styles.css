@@ -632,17 +632,16 @@ button.active-tool {
   outline-offset: -2px;
 }
 
-.open-tui-filter-semantic {
+.open-tui-space-semantic {
   position: absolute;
-  top: 138px;
   right: 0;
   left: 0;
   width: 100%;
-  height: 20px;
+  min-height: 20px;
   opacity: 0.001;
 }
 
-.open-tui-filter-semantic:focus-visible {
+.open-tui-space-semantic:focus-visible {
   opacity: 1;
   outline: 2px solid var(--gold-hot);
   outline-offset: -2px;

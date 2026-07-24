@@ -31,6 +31,20 @@ test("adds a machine, creates a workspace on it, and removes it without shell ac
   await expect(manager.getByText(machineName, { exact: true })).toBeVisible();
   await manager.getByRole("button", { name: "Close", exact: true }).click();
 
+  if (testInfo.project.name === "chromium") {
+    const agents = page.getByRole("tree", { name: "Agents" });
+    const existingAgent = agents.getByRole("treeitem").first();
+    await expect(existingAgent).toBeVisible();
+    const space = page.getByRole("navigation", { name: "Spaces" })
+      .getByRole("button", { name: new RegExp(`^${machineName},`) });
+    await space.focus();
+    await page.keyboard.press("Enter");
+    await expect(space).toHaveAttribute("aria-current", "true");
+    await expect(agents).toHaveAttribute("data-grouping", "space");
+    await expect(agents).toHaveAttribute("data-target-space-id", machineId);
+    await expect(existingAgent).toBeVisible();
+  }
+
   await page.keyboard.press("Control+K");
   await palette.getByPlaceholder("Search commands, workspaces, tabs, hosts")
     .fill(`New workspace on ${machineName}`);
