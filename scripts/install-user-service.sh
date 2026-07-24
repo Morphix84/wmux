@@ -40,10 +40,16 @@ if [[ -z "${HELPER_URL}" ]]; then
   HELPER_URL="${PUBLIC_URL}"
 fi
 
-mkdir -p "${HOME}/.config/systemd/user"
-mkdir -p "${HOME}/.local/bin"
 mkdir -p "${HOME}/.wmux"
 chmod 700 "${HOME}/.wmux"
+
+# The service runs directly from this checkout, so update its installed
+# packages before restarting. This keeps a pull that changes a vendored or
+# registry dependency from serving client code against stale node_modules.
+(cd "${ROOT_DIR}" && npm install)
+
+mkdir -p "${HOME}/.config/systemd/user"
+mkdir -p "${HOME}/.local/bin"
 
 for helper in "${ROOT_DIR}"/scripts/wmux-* "${ROOT_DIR}"/scripts/wclip "${ROOT_DIR}"/scripts/wmclip; do
   [[ -f "${helper}" && -x "${helper}" ]] || continue
