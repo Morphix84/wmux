@@ -768,11 +768,7 @@ export class SessionManager {
     this.resizeOwners.delete(pane.id);
     const backend = this.backends.get(pane.id);
     if (backend) {
-      void backend.dispose(pane.id, existing, { kill: true })
-        .then((cleaned) => {
-          if (cleaned) this.durableEndpoints.deleteActiveForPane(pane.id);
-        })
-        .catch(() => undefined);
+      backend.detach(existing);
     } else {
       existing.kill();
     }
