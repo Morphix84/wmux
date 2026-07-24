@@ -19,6 +19,11 @@ import { resolveHelperUrl } from "./helper-url.js";
 import { wmuxReleaseVersion } from "./version.js";
 
 const WINDOWS_HEALTH_CACHE_MS = 15_000;
+// The PowerShell probe performs several independently bounded checks (native
+// agent, Sunshine, and wmux reachability) after SSH and PowerShell startup.
+// Leave enough room for all of their 3-second deadlines plus process overhead
+// so a slow optional integration cannot make a healthy SSH host look offline.
+const WINDOWS_HEALTH_PROBE_TIMEOUT_MS = 15_000;
 const nodeMachinePlatform = (nodePlatform: NodeJS.Platform): MachinePlatform => {
   if (nodePlatform === "darwin") return "mac";
   if (nodePlatform === "win32") return "win";
@@ -104,7 +109,7 @@ const probeWindowsPowerShellSsh = async (
   if (machine.port) args.push("-p", String(machine.port));
   const script = buildWindowsHealthProbeScript(wmuxUrl);
   args.push(target, machine.shell ?? "pwsh", "-NoLogo", "-NoProfile", "-Command", "-");
-  const result = await runSshProbe(args, script, 7_000);
+  const result = await runSshProbe(args, script, WINDOWS_HEALTH_PROBE_TIMEOUT_MS);
   const health = parseWindowsHealth(result.stdout);
   const probe: WindowsHealthProbe =
     result.status === 0 && health
