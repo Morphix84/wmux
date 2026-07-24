@@ -43,6 +43,7 @@ run(python.command, [
   "scripts/wmux_agent_contract.py",
   "scripts/wmux-copy",
   "scripts/wmux-run",
+  "scripts/wmux-shell-run-event",
   "scripts/wmux-opencode-run",
   "scripts/wmux-stream-agent",
   "scripts/wmux-windows-agent",

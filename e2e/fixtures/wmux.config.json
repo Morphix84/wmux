@@ -2,6 +2,7 @@
   "keybindings": {
     "terminal.wordPrevious": ["Alt+ArrowLeft", "Ctrl+Shift+KeyP"]
   },
+  "shellCommandTracking": true,
   "machines": [
     {
       "id": "local",

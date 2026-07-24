@@ -1,6 +1,7 @@
 {
   "terminalFontFamily": "\"MesloLGM Nerd Font\"",
   "terminalFontSize": 15,
+  "shellCommandTracking": false,
   "delegation": {
     "preferHeadless": false,
     "waitTimeoutSeconds": {

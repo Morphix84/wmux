@@ -155,6 +155,67 @@ test("raw local panes apply an available agent profile before the shell", () => 
   assert.match(spec.args.join(" "), /exec/);
 });
 
+test("opt-in raw bash panes install managed command tracking hooks", () => {
+  const spec = buildSpawnSpec({
+    id: "tracked",
+    name: "Tracked",
+    kind: "local",
+    shell: "/bin/bash",
+    sessionBackend: "pty",
+  }, 120, 40, {
+    ...extraEnv,
+    WMUX_SHELL_COMMAND_TRACKING: "1",
+  });
+  const command = spec.args.join(" ");
+  assert.equal(spec.file, "/bin/sh");
+  assert.match(command, /wmux-shell-run-event start/);
+  assert.match(command, /wmux-shell-run-event finish/);
+  assert.match(command, /_wmux_command_debug_trap/);
+  assert.match(command, /_wmux_command_precmd/);
+});
+
+test("opt-in raw zsh panes install preexec and precmd command tracking hooks", () => {
+  const spec = buildSpawnSpec({
+    id: "tracked-zsh",
+    name: "Tracked zsh",
+    kind: "local",
+    shell: "/bin/zsh",
+    sessionBackend: "pty",
+  }, 120, 40, {
+    ...extraEnv,
+    WMUX_SHELL_COMMAND_TRACKING: "1",
+  });
+  const command = spec.args.join(" ");
+  assert.match(command, /preexec_functions=.*_wmux_command_preexec/);
+  assert.match(command, /precmd_functions=.*_wmux_command_precmd/);
+  assert.match(command, /wmux-shell-run-event start/);
+  assert.match(command, /wmux-shell-run-event finish/);
+});
+
+test("raw shell command tracking remains disabled or unsupported by default", () => {
+  const bash = buildSpawnSpec({
+    id: "plain-bash",
+    name: "Plain bash",
+    kind: "local",
+    shell: "/bin/bash",
+    sessionBackend: "pty",
+  }, 120, 40, extraEnv);
+  assert.doesNotMatch(bash.args.join(" "), /wmux-shell-run-event/);
+
+  const sh = buildSpawnSpec({
+    id: "plain-sh",
+    name: "Plain sh",
+    kind: "local",
+    shell: "/bin/sh",
+    sessionBackend: "pty",
+  }, 120, 40, {
+    ...extraEnv,
+    WMUX_SHELL_COMMAND_TRACKING: "1",
+  });
+  assert.doesNotMatch(sh.args.join(" "), /wmux-shell-run-event/);
+  assert.match(sh.args.join(" "), /exec '\/bin\/sh'/);
+});
+
 test("POSIX SSH staging includes the hook installer beside its event helper", { skip: process.platform === "win32" }, () => {
   const spec = buildSpawnSpec(machines[5].machine, 120, 40, extraEnv);
   assert.equal(spec.file, "/bin/sh");
@@ -173,14 +234,17 @@ test("POSIX SSH staging includes the hook installer beside its event helper", { 
   assert.match(command, /wmux-agent-event/);
   assert.match(command, /wmux-opencode-run/);
   assert.match(command, /wmux-agent-run/);
+  assert.match(command, /wmux-shell-run-event/);
   assert.match(command, /wmuxctl/);
   assert.match(command, /chmod \+x .*wmux-hooks/);
   assert.match(command, /chmod \+x .*wmux-opencode-run/);
   assert.match(command, /chmod \+x .*wmux-agent-run/);
+  assert.match(command, /chmod \+x .*wmux-shell-run-event/);
   assert.match(command, /chmod \+x .*wmuxctl/);
   assert.match(command, /ln -sf .*wmux-hooks/);
   assert.match(command, /ln -sf .*wmux-opencode-run/);
   assert.match(command, /ln -sf .*wmux-agent-run/);
+  assert.match(command, /ln -sf .*wmux-shell-run-event/);
   assert.match(command, /ln -sf .*wmuxctl/);
   assert.match(command, /wmux-agent-profile/);
   assert.match(command, /wmux-agent-profile apply --quiet/);

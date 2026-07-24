@@ -83,7 +83,11 @@ const sshBackend: Backend = {
         cwd: startCwd,
         cols,
         rows,
-        shellCommand: interactiveShellCommand(`"\${SHELL:-/bin/sh}"`, sessionName),
+        shellCommand: interactiveShellCommand(
+          `"\${SHELL:-/bin/sh}"`,
+          sessionName,
+          extraEnv.WMUX_SHELL_COMMAND_TRACKING === "1",
+        ),
         extraEnv: remoteEnv,
         helperPathExport: `export PATH="$wmux_helper_dir:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/opt/local/bin:$PATH";`,
         agentProfileOptionalAuth: machine.source === "registered",
@@ -159,7 +163,11 @@ const localBackend: Backend = {
         cwd: startCwd,
         cols,
         rows,
-        shellCommand: interactiveShellCommand(shellQuote(machine.shell ?? defaultShell()), sessionName),
+        shellCommand: interactiveShellCommand(
+          shellQuote(machine.shell ?? defaultShell()),
+          sessionName,
+          extraEnv.WMUX_SHELL_COMMAND_TRACKING === "1",
+        ),
         extraEnv,
         helperPathExport: `export PATH=${shellQuote(`${process.cwd()}/scripts`)}":$HOME/.local/bin:$PATH";`,
         agentProfileOptionalAuth: false,
@@ -175,6 +183,25 @@ const localBackend: Backend = {
       };
     }
     const shell = machine.shell ?? defaultShell();
+    if (
+      extraEnv.WMUX_SHELL_COMMAND_TRACKING === "1"
+      && ["bash", "zsh"].includes(path.basename(shell))
+    ) {
+      const sessionName = durableSessionName(extraEnv.WMUX_PANE_ID);
+      const managedShell = interactiveShellCommand(shellQuote(shell), sessionName, true);
+      return {
+        file: "/bin/sh",
+        args: [
+          "-lc",
+          `export PATH=${shellQuote(`${process.cwd()}/scripts`)}":$HOME/.local/bin:$PATH"; `
+            + `wmux-agent-profile apply --quiet || true; ${managedShell}`,
+        ],
+        cwd: startCwd,
+        env,
+        title: path.basename(shell),
+        trackProcessTitle: true,
+      };
+    }
     return {
       file: "/bin/sh",
       args: ["-lc", `wmux-agent-profile apply --quiet || true; exec ${shellQuote(shell)}`],
@@ -251,7 +278,99 @@ wmux_run_base="\${XDG_RUNTIME_DIR:-\${HOME:-\${TMPDIR:-/tmp}}/.wmux/run}";
 mkdir -p "$wmux_run_base" 2>/dev/null || true;
 chmod 700 "$wmux_run_base" 2>/dev/null || true;`;
 
-const interactiveShellCommand = (shellValue: string, sessionName: string): string => {
+const interactiveShellCommand = (
+  shellValue: string,
+  sessionName: string,
+  commandTracking: boolean,
+): string => {
+  const zshCommandTracking = commandTracking
+    ? `
+_wmux_command_sequence=0
+_wmux_command_run_id=
+_wmux_command_text=
+_wmux_command_preexec() {
+  emulate -L zsh
+  local command_text="$1"
+  [[ -n "$command_text" && -n "\${WMUX_PANE_ID:-}" ]] || return
+  command -v wmux-shell-run-event >/dev/null 2>&1 || return
+  _wmux_command_sequence=$((_wmux_command_sequence + 1))
+  _wmux_command_run_id="run_shell_\${WMUX_PANE_ID}_$$_\${_wmux_command_sequence}"
+  _wmux_command_text="$command_text"
+  command wmux-shell-run-event start --run-id "$_wmux_command_run_id" --command "$_wmux_command_text" >/dev/null 2>&1 &!
+}
+_wmux_command_precmd() {
+  local exit_code=$?
+  emulate -L zsh
+  if [[ -n "\${_wmux_command_run_id:-}" ]]; then
+    command wmux-shell-run-event finish --run-id "$_wmux_command_run_id" --command "$_wmux_command_text" --exit-code "$exit_code" >/dev/null 2>&1 &!
+    _wmux_command_run_id=
+    _wmux_command_text=
+  fi
+  return "$exit_code"
+}
+precmd_functions=(_wmux_command_precmd \${precmd_functions:#_wmux_command_precmd})
+preexec_functions=(_wmux_command_preexec \${preexec_functions:#_wmux_command_preexec})
+`
+    : "";
+  const bashPromptHooks = commandTracking
+    ? `
+_wmux_command_sequence=0
+_wmux_command_run_id=
+_wmux_command_text=
+_wmux_command_ready=0
+_wmux_command_preexec() {
+  local command_text="$1"
+  [[ -n "$command_text" && -n "\${WMUX_PANE_ID:-}" ]] || return
+  command -v wmux-shell-run-event >/dev/null 2>&1 || return
+  _wmux_command_sequence=$((_wmux_command_sequence + 1))
+  _wmux_command_run_id="run_shell_\${WMUX_PANE_ID}_$$_\${_wmux_command_sequence}"
+  _wmux_command_text="$command_text"
+  command wmux-shell-run-event start --run-id "$_wmux_command_run_id" --command "$_wmux_command_text" >/dev/null 2>&1 &
+  local helper_pid=$!
+  disown "$helper_pid" 2>/dev/null || true
+}
+_wmux_command_precmd() {
+  local exit_code=$?
+  if [[ -n "\${_wmux_command_run_id:-}" ]]; then
+    command wmux-shell-run-event finish --run-id "$_wmux_command_run_id" --command "$_wmux_command_text" --exit-code "$exit_code" >/dev/null 2>&1 &
+    local helper_pid=$!
+    disown "$helper_pid" 2>/dev/null || true
+    _wmux_command_run_id=
+    _wmux_command_text=
+  fi
+  return "$exit_code"
+}
+_wmux_mark_command_ready() {
+  _wmux_command_ready=1
+}
+_wmux_command_debug_trap() {
+  local exit_code=$?
+  if [[ "\${_wmux_command_ready:-0}" == 1 ]]; then
+    _wmux_command_ready=0
+    _wmux_command_preexec "$BASH_COMMAND"
+  fi
+  _wmux_emit_cursor_inactive
+  return "$exit_code"
+}
+case ";\${PROMPT_COMMAND:-};" in
+  *";_wmux_command_precmd;"*) ;;
+  *) PROMPT_COMMAND="_wmux_command_precmd; _wmux_emit_cwd\${PROMPT_COMMAND:+; $PROMPT_COMMAND}; _wmux_mark_command_ready" ;;
+esac
+_wmux_install_cursor_bindings
+if [ -z "$(trap -p DEBUG)" ]; then
+  trap '_wmux_command_debug_trap' DEBUG
+fi
+`
+    : `
+case ";\${PROMPT_COMMAND:-};" in
+  *";_wmux_emit_cwd;"*) ;;
+  *) PROMPT_COMMAND="_wmux_emit_cwd\${PROMPT_COMMAND:+; $PROMPT_COMMAND}" ;;
+esac
+_wmux_install_cursor_bindings
+if [ -z "$(trap -p DEBUG)" ]; then
+  trap '_wmux_emit_cursor_inactive' DEBUG
+fi
+`;
   return `
 wmux_shell=${shellValue};
 wmux_shell_name="\${wmux_shell##*/}";${runtimeStageDirScript}
@@ -288,7 +407,7 @@ _wmux_emit_control() {
 _wmux_emit_cursor_inactive() {
   emulate -L zsh
   _wmux_emit_control cursor=0
-}
+}${zshCommandTracking}
 _wmux_query_cursor_position() {
   emulate -L zsh
   local old_stty response char body row col
@@ -484,14 +603,7 @@ _wmux_install_cursor_bindings() {
   bind -m vi-insert -x '"\\e[9000;": _wmux_click_cursor' 2>/dev/null || true
   bind -m vi-command -x '"\\e[9000;": _wmux_click_cursor' 2>/dev/null || true
 }
-case ";\${PROMPT_COMMAND:-};" in
-  *";_wmux_emit_cwd;"*) ;;
-  *) PROMPT_COMMAND="_wmux_emit_cwd\${PROMPT_COMMAND:+; $PROMPT_COMMAND}" ;;
-esac
-_wmux_install_cursor_bindings
-if [ -z "$(trap -p DEBUG)" ]; then
-  trap '_wmux_emit_cursor_inactive' DEBUG
-fi
+${bashPromptHooks}
 _wmux_emit_cwd
 __WMUX_BASHRC__
     exec "$wmux_shell" --rcfile "$wmux_shell_dir/bashrc" -i
@@ -820,6 +932,9 @@ __WMUX_HOOKS_HELPER__
 cat > "$wmux_helper_dir/wmux-run" <<'__WMUX_RUN_HELPER__'
 ${localHelperScript("wmux-run")}
 __WMUX_RUN_HELPER__
+cat > "$wmux_helper_dir/wmux-shell-run-event" <<'__WMUX_SHELL_RUN_EVENT_HELPER__'
+${localHelperScript("wmux-shell-run-event")}
+__WMUX_SHELL_RUN_EVENT_HELPER__
 cat > "$wmux_helper_dir/wmux-opencode-run" <<'__WMUX_OPENCODE_RUN_HELPER__'
 ${localHelperScript("wmux-opencode-run")}
 __WMUX_OPENCODE_RUN_HELPER__
@@ -847,7 +962,7 @@ __WMUX_AGENT_PROFILE_HELPER__
 cat > "$wmux_helper_dir/wmuxctl" <<'__WMUX_CTL_HELPER__'
 ${localSkillScript("wmux", "scripts", "wmuxctl.py")}
 __WMUX_CTL_HELPER__
-chmod +x "$wmux_helper_dir/wmux-media" "$wmux_helper_dir/wmux-notify" "$wmux_helper_dir/wmux-title" "$wmux_helper_dir/wmux-agent-event" "$wmux_helper_dir/wmux-hooks" "$wmux_helper_dir/wmux-run" "$wmux_helper_dir/wmux-opencode-run" "$wmux_helper_dir/wmux-agent-run" "$wmux_helper_dir/wmux-copy" "$wmux_helper_dir/wmux-stream-agent" "$wmux_helper_dir/wmux-stream-agent-service" "$wmux_helper_dir/wmux-sunshine-setup" "$wmux_helper_dir/wmux-agent-profile" "$wmux_helper_dir/wmuxctl";
+chmod +x "$wmux_helper_dir/wmux-media" "$wmux_helper_dir/wmux-notify" "$wmux_helper_dir/wmux-title" "$wmux_helper_dir/wmux-agent-event" "$wmux_helper_dir/wmux-hooks" "$wmux_helper_dir/wmux-run" "$wmux_helper_dir/wmux-shell-run-event" "$wmux_helper_dir/wmux-opencode-run" "$wmux_helper_dir/wmux-agent-run" "$wmux_helper_dir/wmux-copy" "$wmux_helper_dir/wmux-stream-agent" "$wmux_helper_dir/wmux-stream-agent-service" "$wmux_helper_dir/wmux-sunshine-setup" "$wmux_helper_dir/wmux-agent-profile" "$wmux_helper_dir/wmuxctl";
 ln -sf "$wmux_helper_dir/wmux-copy" "$wmux_helper_dir/wmux-clip" 2>/dev/null || true;
 ln -sf "$wmux_helper_dir/wmux-copy" "$wmux_helper_dir/wclip" 2>/dev/null || true;
 ln -sf "$wmux_helper_dir/wmux-copy" "$wmux_helper_dir/wmclip" 2>/dev/null || true;
@@ -865,6 +980,7 @@ for wmux_path_dir in $wmux_candidate_path; do
         ln -sf "$wmux_helper_dir/wmux-agent-event" "$wmux_path_dir/wmux-agent-event" 2>/dev/null || true;
         ln -sf "$wmux_helper_dir/wmux-hooks" "$wmux_path_dir/wmux-hooks" 2>/dev/null || true;
         ln -sf "$wmux_helper_dir/wmux-run" "$wmux_path_dir/wmux-run" 2>/dev/null || true;
+        ln -sf "$wmux_helper_dir/wmux-shell-run-event" "$wmux_path_dir/wmux-shell-run-event" 2>/dev/null || true;
         ln -sf "$wmux_helper_dir/wmux-opencode-run" "$wmux_path_dir/wmux-opencode-run" 2>/dev/null || true;
         ln -sf "$wmux_helper_dir/wmux-agent-run" "$wmux_path_dir/wmux-agent-run" 2>/dev/null || true;
         ln -sf "$wmux_helper_dir/wmux-copy" "$wmux_path_dir/wmux-copy" 2>/dev/null || true;

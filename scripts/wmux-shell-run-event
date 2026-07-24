@@ -1,0 +1,129 @@
+#!/usr/bin/env python3
+import argparse
+import datetime
+import json
+import os
+import re
+import urllib.request
+
+
+def wmux_url():
+    url = os.environ.get("WMUX_URL")
+    if url:
+        return url
+    try:
+        with open(os.path.expanduser("~/.wmux/url"), "r", encoding="utf-8") as handle:
+            url = handle.read().strip()
+    except OSError:
+        url = ""
+    return url or "http://127.0.0.1:3478"
+
+
+def wmux_token():
+    env_configured = "WMUX_HELPER_TOKEN" in os.environ
+    env_token = os.environ.get("WMUX_HELPER_TOKEN", "").strip()
+    if env_configured and not re.fullmatch(r"[A-Za-z0-9_-]{32,256}", env_token):
+        raise SystemExit("wmux-shell-run-event: configured helper token is empty or malformed")
+    path_configured = "WMUX_HELPER_TOKEN_PATH" in os.environ
+    path_value = os.environ.get("WMUX_HELPER_TOKEN_PATH", "").strip()
+    if path_configured and not path_value:
+        raise SystemExit("wmux-shell-run-event: configured helper token path is empty")
+    path = path_value if path_configured else os.path.expanduser("~/.wmux/helper-token")
+    if path_configured or os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                token = handle.read().strip()
+        except OSError:
+            token = ""
+        if not re.fullmatch(r"[A-Za-z0-9_-]{32,256}", token):
+            raise SystemExit(
+                "wmux-shell-run-event: configured helper token file is unreadable or malformed"
+            )
+        return token
+    if env_configured:
+        return env_token
+    if os.environ.get("WMUX_BROWSER_AUTH_MODE", "shared-or-login") == "login-only":
+        return ""
+    token = os.environ.get("WMUX_TOKEN")
+    if token:
+        return token
+    path = os.environ.get("WMUX_TOKEN_PATH") or os.path.expanduser("~/.wmux/token")
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            return handle.read().strip()
+    except OSError:
+        return ""
+
+
+def utc_now():
+    return datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def clean_command(command):
+    return re.sub(r"\s+", " ", command).strip()[:500] or "command"
+
+
+def post_event(url, payload):
+    token = wmux_token()
+    headers = {"content-type": "application/json"}
+    if token:
+        headers["authorization"] = "Bearer " + token
+    request = urllib.request.Request(
+        url.rstrip("/") + "/api/run-events",
+        data=json.dumps(payload).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=2):
+            pass
+    except Exception:
+        pass
+
+
+def main():
+    parser = argparse.ArgumentParser(prog="wmux-shell-run-event")
+    parser.add_argument("phase", choices=("start", "finish"))
+    parser.add_argument("--run-id", required=True)
+    parser.add_argument("--command", required=True)
+    parser.add_argument("--exit-code", type=int)
+    parser.add_argument("--url", default=wmux_url())
+    args = parser.parse_args()
+
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", args.run_id):
+        parser.error("run id is invalid")
+    pane_id = os.environ.get("WMUX_PANE_ID", "")
+    workspace_id = os.environ.get("WMUX_WORKSPACE_ID", "")
+    if not pane_id and not workspace_id:
+        return 0
+
+    payload = {
+        "runId": args.run_id,
+        "command": clean_command(args.command),
+    }
+    if pane_id:
+        payload["paneId"] = pane_id
+    if workspace_id:
+        payload["workspaceId"] = workspace_id
+    tab_id = os.environ.get("WMUX_TAB_ID", "")
+    if tab_id:
+        payload["tabId"] = tab_id
+
+    timestamp = utc_now()
+    if args.phase == "start":
+        payload.update({"status": "started", "startedAt": timestamp})
+    else:
+        exit_code = args.exit_code if args.exit_code is not None else 1
+        payload.update(
+            {
+                "status": "completed" if exit_code == 0 else "failed",
+                "exitCode": exit_code,
+                "completedAt": timestamp,
+            }
+        )
+    post_event(args.url, payload)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

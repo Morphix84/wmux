@@ -91,6 +91,15 @@ export function OpenTuiActivityPanel({ rows, onClose }: OpenTuiActivityPanelProp
   return (
     <aside className="activity-panel open-tui-activity-panel" aria-label="Activity">
       <canvas ref={canvasRef} className="open-tui-canvas" onClick={onClick} onPointerMove={onPointerMove} />
+      <div className="open-tui-activity-semantics" role="list" aria-label="Activity entries">
+        {renderRows.map((row) => (
+          <div
+            key={row.id}
+            role="listitem"
+            aria-label={`${row.kind}: ${row.title}; ${row.summary}; ${row.meta}`}
+          />
+        ))}
+      </div>
     </aside>
   );
 }

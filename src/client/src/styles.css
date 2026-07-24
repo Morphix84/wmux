@@ -4675,6 +4675,15 @@ button.active-tool {
   background: var(--black);
 }
 
+.open-tui-activity-semantics {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .activity-header {
   display: flex;
   align-items: center;
