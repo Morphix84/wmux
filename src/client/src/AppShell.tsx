@@ -181,6 +181,13 @@ export function AppShell() {
   const mobileSidebarCloseRef = useRef<HTMLButtonElement | null>(null);
   const finishBoot = useCallback(() => setBootComplete(true), []);
   const dismissMobileClose = useCallback(() => setPendingMobileClose(null), []);
+  const toggleMobileNavigation = useCallback(() => {
+    if (sidebarCollapsed) {
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+      mobileViewport.dispatchInteraction("drawer-opened");
+    }
+    toggleSidebar();
+  }, [mobileViewport.dispatchInteraction, sidebarCollapsed, toggleSidebar]);
 
   const rebaseIncomingState = useCallback((payload: BootstrapPayload): BootstrapPayload =>
     rebaseCollapsedWorkspaceIds(
@@ -1561,8 +1568,8 @@ export function AppShell() {
               ) : <span className="workspace-disclosure-spacer" aria-hidden="true" />}
               <a
                 href={workspaceTabPath(workspace.id, tab.id)}
-                title={`${tooltip}${workspaceTree.movesDisabled ? "" : " / Drag to reorder"}`}
-                draggable={!workspaceTree.movesDisabled}
+                title={`${tooltip}${mobileViewport.isMobile || workspaceTree.movesDisabled ? "" : " / Drag to reorder"}`}
+                draggable={!mobileViewport.isMobile && !workspaceTree.movesDisabled}
                 role="treeitem"
                 aria-level={treeRow.depth + 1}
                 aria-expanded={treeRow.hasChildren ? treeRow.effectiveExpanded : undefined}
@@ -1576,9 +1583,11 @@ export function AppShell() {
                     ? `drop-${workspaceDropPreview.position}`
                     : ""
                 }`}
-                onClick={(event) => activateWorkspaceLink(event, workspace.id, tab.id, { focusTerminal: true })}
+                onClick={(event) => activateWorkspaceLink(event, workspace.id, tab.id, {
+                  focusTerminal: !mobileViewport.isMobile,
+                })}
                 onDragStart={(event) => {
-                  if (workspaceTree.movesDisabled) {
+                  if (mobileViewport.isMobile || workspaceTree.movesDisabled) {
                     event.preventDefault();
                     return;
                   }
@@ -1589,7 +1598,7 @@ export function AppShell() {
                   setWorkspaceDropPreview(null);
                 }}
                 onDragOver={(event) => {
-                  if (workspaceTree.movesDisabled) return;
+                  if (mobileViewport.isMobile || workspaceTree.movesDisabled) return;
                   const sourceWorkspaceId = draggedWorkspaceId.current;
                   if (!sourceWorkspaceId || sourceWorkspaceId === workspace.id) {
                     workspaceDropPreviewRef.current = null;
@@ -1847,7 +1856,7 @@ export function AppShell() {
             serviceConnection={serviceConnection}
             surfaceMode={mobileSurfaceMode}
             navigationOpen={!sidebarCollapsed}
-            onToggleNavigation={toggleSidebar}
+            onToggleNavigation={toggleMobileNavigation}
             onSurfaceModeChange={setMobileSurfaceMode}
             onOpenFleet={() => setAgentFleetOpen(true)}
             onOpenActions={openCommandPalette}

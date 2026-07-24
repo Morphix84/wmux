@@ -102,7 +102,8 @@ function RetroTerminalBootScreen({
           resolve();
           return;
         }
-        terminal.write(terminalText(text), resolve);
+        terminal.write(terminalText(text));
+        requestAnimationFrame(() => resolve());
       });
 
     const promptForUsername = () => {

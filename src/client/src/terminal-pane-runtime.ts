@@ -1,37 +1,6 @@
 import type { MutableRefObject } from "react";
 import { Terminal } from "ghostty-web";
-import {
-  isKittyPlaceholder,
-  isKittyPlaceholderMark,
-  nextNonMarkIsPlaceholder,
-  type KittyMaterializedImage,
-  type KittyPlaceholderStripState,
-} from "./kitty-graphics";
-import type { PaneClientMessage, PaneState, TerminalMedia, TerminalRun } from "./types";
-
-export interface KittyInlineImage {
-  id: string;
-  imageId: string;
-  name: string;
-  mimeType: string;
-  data: string;
-  col: number;
-  row: number;
-  cols: number;
-  rows: number;
-  createdAt: string;
-}
-
-export interface KittyVirtualPlacement {
-  cols: number;
-  rows: number;
-}
-
-export interface KittyPlaceholderCell {
-  imageId: string;
-  col: number;
-  row: number;
-}
+import type { PaneClientMessage, TerminalRun } from "./types";
 
 export interface CellMetrics {
   width: number;
@@ -564,20 +533,6 @@ export const mouseCellInGrid = (event: MouseEvent, term: Terminal): { col: numbe
   };
 };
 
-export const kittyImageToMedia = (image: KittyMaterializedImage, pane: PaneState, imageId?: string): TerminalMedia => ({
-  id: createLocalMediaId(imageId),
-  workspaceId: "",
-  tabId: "",
-  paneId: pane.id,
-  name: image.name,
-  mimeType: image.mimeType,
-  data: image.data,
-  createdAt: new Date().toISOString(),
-});
-
-export const createLocalMediaId = (imageId = "image"): string =>
-  `kitty_${imageId.replace(/[^A-Za-z0-9-]/g, "_")}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-
 export const wheelLines = (event: WheelEvent, term: Terminal): number => {
   if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) return event.deltaY;
   if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) return event.deltaY * safeRows(term.rows);
@@ -666,9 +621,7 @@ export const DECSTR = /\x1b\[[0-9;]*!p/g;
 export const writeTerminalOutput = (
   term: Terminal,
   carryRef: MutableRefObject<string>,
-  kittyPlaceholderStripRef: MutableRefObject<KittyPlaceholderStripState>,
   data: string,
-  onKittyPlaceholder?: () => void,
   onCursorPositionReportRequest?: (privateMode: boolean) => void,
 ): void => {
   const combined = carryRef.current + data;
@@ -677,24 +630,18 @@ export const writeTerminalOutput = (
   carryRef.current = partial?.[0] ?? "";
   writeTerminalBody(
     term,
-    kittyPlaceholderStripRef.current,
     body.replace(DECSTR, DECSTR_SHIM),
-    onKittyPlaceholder,
     onCursorPositionReportRequest,
   );
 };
 
 export const writeTerminalBody = (
   term: Terminal,
-  state: KittyPlaceholderStripState,
   data: string,
-  onKittyPlaceholder?: () => void,
   onCursorPositionReportRequest?: (privateMode: boolean) => void,
 ): void => {
   let pending = "";
   const chars = Array.from(data);
-  let previousWasPlaceholder = state.pendingPlaceholderMarks;
-  state.pendingPlaceholderMarks = false;
 
   const flush = () => {
     if (!pending) return;
@@ -725,28 +672,9 @@ export const writeTerminalBody = (
       index += 4;
       continue;
     }
-    if (isKittyPlaceholder(char)) {
-      flush();
-      onKittyPlaceholder?.();
-      pending += " ";
-      while (isKittyPlaceholderMark(chars[index + 1])) index += 1;
-      previousWasPlaceholder = true;
-      continue;
-    }
-    if (previousWasPlaceholder && isKittyPlaceholderMark(char)) {
-      previousWasPlaceholder = true;
-      continue;
-    }
-    if (char === "\b" && (previousWasPlaceholder || nextNonMarkIsPlaceholder(chars, index + 1))) {
-      pending += char;
-      previousWasPlaceholder = true;
-      continue;
-    }
     pending += char;
-    previousWasPlaceholder = false;
   }
 
-  state.pendingPlaceholderMarks = previousWasPlaceholder;
   flush();
 };
 

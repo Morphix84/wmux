@@ -21,6 +21,11 @@ import {
   type StagedPasteImage,
 } from "./paste-image-staging.js";
 import { DurableEndpointStore } from "./durable-endpoint-store.js";
+import {
+  KittyGraphicsSourceError,
+  readKittyGraphicsSource,
+  type KittyGraphicsSourceRequest,
+} from "./kitty-graphics-source.js";
 
 export type ClientMessage = PaneClientMessage;
 
@@ -171,6 +176,26 @@ export class SessionManager {
   hasLivePaneSession(paneId: string): boolean {
     const session = this.sessions.get(paneId);
     return Boolean(this.state.findPane(paneId) && session && !session.isExited && this.sessionMachines.has(paneId));
+  }
+
+  async readKittyGraphicsSource(paneId: string, request: KittyGraphicsSourceRequest): Promise<Buffer> {
+    const pane = this.state.findPane(paneId);
+    const session = this.sessions.get(paneId);
+    const machine = this.sessionMachines.get(paneId);
+    if (!pane) throw new KittyGraphicsSourceError(404, "pane_not_found");
+    if (!session || session.isExited || !machine) {
+      throw new KittyGraphicsSourceError(409, "kitty_source_pane_not_live");
+    }
+    const data = await readKittyGraphicsSource(machine, paneId, request);
+    if (
+      this.state.findPane(paneId) !== pane
+      || this.sessions.get(paneId) !== session
+      || session.isExited
+      || this.sessionMachines.get(paneId) !== machine
+    ) {
+      throw new KittyGraphicsSourceError(409, "kitty_source_pane_not_live");
+    }
+    return data;
   }
 
   async stagePasteImage(paneId: string, data: Buffer): Promise<StagedPasteImage> {

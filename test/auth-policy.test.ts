@@ -52,6 +52,7 @@ const routeCases: Array<[string, string, string]> = [
   ["workspace-reorder", "POST", "/api/workspaces/reorder"], ["notification-create", "POST", "/api/notifications"],
   ["agent-event", "POST", "/api/agent-events"], ["run-event", "POST", "/api/run-events"],
   ["media", "POST", "/api/media"], ["clipboard", "POST", "/api/clipboard"],
+  ["pane-kitty-graphics-source", "POST", "/api/panes/pane/kitty-graphics/source"],
   ["pane-paste-image-stage", "POST", "/api/panes/pane/paste-images"],
   ["pane-paste-image-delete", "DELETE", "/api/panes/pane/paste-images/stage"],
   ["pane-attachment-create", "POST", "/api/panes/pane/attachments"],
@@ -98,6 +99,9 @@ test("browser, automation, helper, registration, and legacy policies are separat
   assert.equal(authorizeHttpPrincipal(auth, principal("automation"), policy("POST", "/api/streams/host/request")), false);
   assert.equal(authorizeHttpPrincipal(auth, principal("automation"), policy("DELETE", "/api/streams/host/request/request")), false);
   assert.equal(authorizeHttpPrincipal(auth, principal("helper"), policy("POST", "/api/workspaces")), false);
+  assert.equal(authorizeHttpPrincipal(auth, principal("browser-session"), policy("POST", "/api/panes/pane/kitty-graphics/source")), true);
+  assert.equal(authorizeHttpPrincipal(auth, principal("helper"), policy("POST", "/api/panes/pane/kitty-graphics/source")), false);
+  assert.equal(authorizeHttpPrincipal(auth, principal("automation"), policy("POST", "/api/panes/pane/kitty-graphics/source")), false);
   assert.equal(authorizeHttpPrincipal(auth, principal("browser-session"), policy("POST", "/api/panes/pane/reviews")), true);
   assert.equal(authorizeHttpPrincipal(auth, principal("automation"), policy("POST", "/api/panes/pane/reviews")), false);
   assert.equal(authorizeHttpPrincipal(auth, principal("helper"), policy("POST", "/api/panes/pane/reviews")), false);

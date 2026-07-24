@@ -37,6 +37,7 @@ export const mobileInteractionTransitions: Readonly<
   },
   "keyboard-open-chrome-collapsed": {
     "viewport-keyboard-closed": "keyboard-closing-anchor-restore",
+    "drawer-opened": "drawer-open",
   },
   "keyboard-closing-anchor-restore": {
     "editable-focused": "keyboard-opening",

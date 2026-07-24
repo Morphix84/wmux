@@ -924,8 +924,11 @@ known implementation gaps. Report vulnerabilities privately according to the
   close.
 - Dynamic registered panes need separately provisioned auth for helpers that
   post back to wmux.
-- Kitty graphics support is partial; Sixel and iTerm2 image protocols are not
-  implemented.
+- Kitty graphics supports direct, file, temporary-file, and POSIX shared-memory
+  transfers with native z-index and scrollback-aware placement.
+  Kitty animation, Sixel, iTerm2 images, and Windows named shared memory remain
+  unsupported and produce a visible diagnostic.
+  See [Terminal graphics](docs/TERMINAL_GRAPHICS.md).
 - View-only streaming is supervised by the native agent, but Wayland capture,
   locked or logged-out Windows capture, macOS permission automation, Sunshine
   app-launch automation, and full-screen Windows app coverage remain works in

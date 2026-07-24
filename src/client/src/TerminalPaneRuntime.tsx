@@ -2,18 +2,11 @@ import { memo, useEffect, useLayoutEffect, useRef, useState, type MutableRefObje
 import { Terminal } from "ghostty-web";
 import { X } from "lucide-react";
 import {
-  KittyGraphicsParser,
-  isKittyPlaceholder,
-  isKittyPlaceholderMark,
-  kittyResponse,
-  materializeKittyGraphic,
-  nextNonMarkIsPlaceholder,
-  shouldDisplayKittyGraphic,
-  shouldRespondToKitty,
-  type KittyControlOperation,
-  type KittyGraphicPayload,
-  type KittyMaterializedImage,
-  type KittyPlaceholderStripState,
+  TerminalGraphicsParser,
+  kittyErrorResponse,
+  normalizeKittyTransfer,
+  type KittyGraphicsTransfer,
+  type TerminalGraphicsDiagnostic,
 } from "./kitty-graphics";
 import { ensureWmuxFonts, terminalFontFamilyStack } from "./fonts";
 import { ensureGhostty } from "./terminal-loader";
@@ -57,9 +50,6 @@ import { useColorScheme } from "./color-scheme-context";
 import { PaneSocketController } from "./pane-socket";
 import { compileKeybindings, eventMatchesAction, type CompiledKeybindingMap } from "../../shared/keybindings";
 import {
-  type KittyInlineImage,
-  type KittyVirtualPlacement,
-  type KittyPlaceholderCell,
   type CellMetrics,
   type SynchronizedOutputState,
   type TerminalFitter,
@@ -88,8 +78,6 @@ import {
   readTerminalSelectionPosition,
   restoreTerminalSelection,
   shellCursorPlacementSequence,
-  kittyImageToMedia,
-  createLocalMediaId,
   wheelLines,
   createWheelScrollCoalescer,
   createTouchScrollGesture,
@@ -190,11 +178,7 @@ export const TerminalPaneRuntime = memo(function TerminalPaneRuntime({
   const outputCarryRef = useRef("");
   const osc52ControllerRef = useRef<Osc52ClipboardController | null>(null);
   const [hasPendingOsc52, setHasPendingOsc52] = useState(false);
-  const kittyParserRef = useRef(new KittyGraphicsParser());
-  const kittyPlaceholderStripRef = useRef<KittyPlaceholderStripState>({ pendingPlaceholderMarks: false });
-  const kittyImageCacheRef = useRef(new Map<string, TerminalMedia>());
-  const kittyVirtualPlacementsRef = useRef(new Map<string, KittyVirtualPlacement>());
-  const pendingVirtualImageIdRef = useRef<string | undefined>();
+  const graphicsParserRef = useRef(new TerminalGraphicsParser());
   const wmuxControlCarryRef = useRef("");
   const synchronizedOutputRef = useRef<SynchronizedOutputState>(createSynchronizedOutputState());
   const shellCursorPlacementRef = useRef(false);
@@ -208,17 +192,14 @@ export const TerminalPaneRuntime = memo(function TerminalPaneRuntime({
   const [connected, setConnected] = useState(false);
   const [connectionIssue, setConnectionIssue] = useState("");
   const [startupLabel, setStartupLabel] = useState("Connecting to terminal…");
-  const [kittyMediaItems, setKittyMediaItems] = useState<TerminalMedia[]>([]);
-  const [kittyInlineItems, setKittyInlineItems] = useState<KittyInlineImage[]>([]);
+  const [graphicsDiagnostic, setGraphicsDiagnostic] = useState<TerminalGraphicsDiagnostic | null>(null);
   const [terminalMetrics, setTerminalMetrics] = useState<CellMetrics>({ width: 8, height: 16 });
-  const [viewportY, setViewportY] = useState(0);
   const [terminalReady, setTerminalReady] = useState(false);
   const [rectangleVersion, setRectangleVersion] = useState(0);
   const [mobileControlArmed, setMobileControlArmed] = useState(false);
   const [mobilePasteFallback, setMobilePasteFallback] = useState<string | null>(null);
   const [mobilePasteReading, setMobilePasteReading] = useState(false);
-  const visibleMediaItems = [...kittyMediaItems, ...mediaItems];
-  const visibleInlineItems = viewportY < 1 ? kittyInlineItems.filter((item) => item.data) : [];
+  const visibleMediaItems = mediaItems;
 
   useEffect(() => {
     colorSchemeRef.current = colorScheme;
@@ -281,7 +262,6 @@ export const TerminalPaneRuntime = memo(function TerminalPaneRuntime({
     let removed = false;
     let fitAddon: TerminalFitter | null = null;
     let socketController: PaneSocketController | undefined;
-    let scrollDisposable: { dispose: () => void } | undefined;
     let renderDisposable: { dispose: () => void } | undefined;
     if (pendingLabel) {
       setTerminalReady(false);
@@ -345,6 +325,8 @@ export const TerminalPaneRuntime = memo(function TerminalPaneRuntime({
     let replayDrainTimer: number | undefined;
     let replayingTerminalOutput = false;
     let outputGeneration = 0;
+    let graphicsOutputChain = Promise.resolve();
+    let pendingGraphicsWork = 0;
     let revealGeneration = 0;
     let durableRefreshRevealGate: DurableRefreshRevealGate | undefined;
     let wheelScroll: ReturnType<typeof createWheelScrollCoalescer> | undefined;
@@ -360,11 +342,7 @@ export const TerminalPaneRuntime = memo(function TerminalPaneRuntime({
     // rather than looping against a down host.
     let awaitingRestart = false;
     const colorQueryParser = new OscColorQueryParser();
-    kittyParserRef.current = new KittyGraphicsParser();
-    kittyPlaceholderStripRef.current.pendingPlaceholderMarks = false;
-    kittyImageCacheRef.current.clear();
-    kittyVirtualPlacementsRef.current.clear();
-    pendingVirtualImageIdRef.current = undefined;
+    graphicsParserRef.current = new TerminalGraphicsParser();
     wmuxControlCarryRef.current = "";
     resetSynchronizedOutput(synchronizedOutputRef.current);
     shellCursorPlacementRef.current = false;
@@ -376,9 +354,7 @@ export const TerminalPaneRuntime = memo(function TerminalPaneRuntime({
       onPendingChange: setHasPendingOsc52,
     });
     osc52ControllerRef.current = osc52Controller;
-    setKittyMediaItems([]);
-    setKittyInlineItems([]);
-    setViewportY(0);
+    setGraphicsDiagnostic(null);
 
     const refreshMetrics = (term: Terminal) => {
       const metrics = readCellMetrics(term);
@@ -647,143 +623,17 @@ export const TerminalPaneRuntime = memo(function TerminalPaneRuntime({
       contextCopyBridgeTimer = window.setTimeout(clearContextCopyBridge, CONTEXT_COPY_BRIDGE_TIMEOUT_MS);
     };
 
-    const sendKittyResponse = (imageId: string | undefined, quiet: string, status: "ok" | "error", message: string) => {
-      if (!imageId || !shouldRespondToKitty(quiet, status)) return;
-      sendInput(socketRef.current, kittyResponse(imageId, message));
-    };
-
-    const addKittyMedia = (media: TerminalMedia) => {
-      setKittyMediaItems((items) => [media, ...items.filter((item) => item.id !== media.id)].slice(0, 10));
-    };
-
-    const updateKittyInlineMedia = (imageId: string, media: TerminalMedia) => {
-      setKittyInlineItems((items) =>
-        items.map((item) =>
-          item.imageId === imageId
-            ? { ...item, name: media.name, mimeType: media.mimeType, data: media.data }
-            : item,
-        ),
-      );
-    };
-
-    const recordKittyPlaceholderCells = (cells: KittyPlaceholderCell[]) => {
-      if (cells.length === 0) return;
-
-      const grouped = new Map<string, KittyPlaceholderCell[]>();
-      for (const cell of cells) {
-        const group = grouped.get(cell.imageId);
-        if (group) {
-          group.push(cell);
-        } else {
-          grouped.set(cell.imageId, [cell]);
-        }
-      }
-
-      setKittyInlineItems((items) => {
-        let next = items;
-        for (const [imageId, imageCells] of grouped) {
-          const meta = kittyVirtualPlacementsRef.current.get(imageId);
-          const media = kittyImageCacheRef.current.get(imageId);
-          const col = Math.min(...imageCells.map((cell) => cell.col));
-          const row = Math.min(...imageCells.map((cell) => cell.row));
-          const maxCol = Math.max(...imageCells.map((cell) => cell.col));
-          const maxRow = Math.max(...imageCells.map((cell) => cell.row));
-          const inlineItem: KittyInlineImage = {
-            id: `kitty_inline_${imageId}`,
-            imageId,
-            name: media?.name ?? `kitty-${imageId}.png`,
-            mimeType: media?.mimeType ?? "image/png",
-            data: media?.data ?? "",
-            col,
-            row,
-            cols: Math.max(1, meta?.cols ?? maxCol - col + 1),
-            rows: Math.max(1, meta?.rows ?? maxRow - row + 1),
-            createdAt: new Date().toISOString(),
-          };
-          const existing = next.findIndex((item) => item.imageId === imageId);
-          next =
-            existing === -1
-              ? [inlineItem, ...next].slice(0, 20)
-              : next.map((item, index) => (index === existing ? { ...item, ...inlineItem } : item));
-        }
-        return next;
-      });
-    };
-
-    const handleKittyControl = (control: KittyControlOperation) => {
-      if (control.error) {
-        sendKittyResponse(control.imageId, control.quiet, "error", control.error);
-        return;
-      }
-      if (control.action === "p") {
-        const cached = control.imageId ? kittyImageCacheRef.current.get(control.imageId) : undefined;
-        if (!cached) {
-          sendKittyResponse(control.imageId, control.quiet, "error", "ENOENT: Kitty image id not found");
-          return;
-        }
-        const media = { ...cached, id: createLocalMediaId() };
-        addKittyMedia(media);
-        sendKittyResponse(control.imageId, control.quiet, "ok", "OK");
-        return;
-      }
-      if (control.action === "d") {
-        if (control.imageId) {
-          kittyImageCacheRef.current.delete(control.imageId);
-          kittyVirtualPlacementsRef.current.delete(control.imageId);
-          setKittyMediaItems((items) => items.filter((item) => !item.id.includes(`_${control.imageId}_`)));
-          setKittyInlineItems((items) => items.filter((item) => item.imageId !== control.imageId));
-        }
-        sendKittyResponse(control.imageId, control.quiet, "ok", "OK");
-      }
-    };
-
-    const handleKittyGraphic = (graphic: KittyGraphicPayload) => {
-      const generation = outputGeneration;
-      if (graphic.virtualPlacement && graphic.imageId) {
-        kittyVirtualPlacementsRef.current.set(graphic.imageId, {
-          cols: Math.max(1, graphic.displayColumns ?? 1),
-          rows: Math.max(1, graphic.displayRows ?? 1),
-        });
-        pendingVirtualImageIdRef.current = graphic.imageId;
-        setKittyInlineItems((items) => items.filter((item) => item.imageId !== graphic.imageId));
-      }
-
-      void materializeKittyGraphic(graphic)
-        .then((image) => {
-          if (cancelled || removed || generation !== outputGeneration) return;
-          const media = kittyImageToMedia(image, pane, graphic.imageId);
-          if (graphic.action !== "q" && graphic.imageId) kittyImageCacheRef.current.set(graphic.imageId, media);
-          if (graphic.virtualPlacement && graphic.imageId) updateKittyInlineMedia(graphic.imageId, media);
-          if (shouldDisplayKittyGraphic(graphic)) addKittyMedia(media);
-          sendKittyResponse(graphic.imageId, graphic.quiet, "ok", "OK");
-        })
-        .catch((error: unknown) => {
-          if (cancelled || removed || generation !== outputGeneration) return;
-          const message = error instanceof Error ? error.message : "Kitty graphics decode failed";
-          sendKittyResponse(graphic.imageId, graphic.quiet, "error", `EINVAL: ${message}`);
-        });
-    };
-
     const writeTerminalTextNow = (term: Terminal, text: string) => {
       if (!text) return;
       terminalLatency.recordWrite(pane.id, performance.now());
-      const placeholderCells: KittyPlaceholderCell[] = [];
       writeTerminalOutput(
         term,
         outputCarryRef,
-        kittyPlaceholderStripRef,
         text,
-        () => {
-          const imageId = pendingVirtualImageIdRef.current;
-          const cursor = term.wasmTerm?.getCursor();
-          if (!imageId || !cursor) return;
-          placeholderCells.push({ imageId, col: cursor.x, row: cursor.y });
-        },
         (privateMode) => {
           if (!replayingTerminalOutput) sendInput(socketRef.current, cursorPositionResponse(term, privateMode), true);
         },
       );
-      recordKittyPlaceholderCells(placeholderCells);
       if (
         predictedInputs.length > 0
         && predictionAcknowledgedSequence === undefined
@@ -846,6 +696,61 @@ export const TerminalPaneRuntime = memo(function TerminalPaneRuntime({
       scheduleSynchronizedOutputFlush(term);
     };
 
+    const showGraphicsDiagnostic = (diagnostic: TerminalGraphicsDiagnostic) => {
+      if (!cancelled) setGraphicsDiagnostic(diagnostic);
+    };
+
+    const enqueueGraphicsWork = (work: () => Promise<void> | void) => {
+      pendingGraphicsWork += 1;
+      graphicsOutputChain = graphicsOutputChain
+        .then(work)
+        .catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : "terminal graphics processing failed";
+          showGraphicsDiagnostic({ protocol: "kitty", message });
+        })
+        .finally(() => {
+          pendingGraphicsWork -= 1;
+        });
+    };
+
+    const handleOrderedTerminalText = (term: Terminal, text: string) => {
+      const generation = outputGeneration;
+      const stripped = stripWmuxControlSequences(wmuxControlCarryRef, text, (control) => {
+        if (control === "cursor=1") shellCursorPlacementRef.current = true;
+        if (control === "cursor=0") shellCursorPlacementRef.current = false;
+      });
+      if (!stripped) return;
+      if (pendingGraphicsWork > 0) {
+        enqueueGraphicsWork(() => {
+          if (!cancelled && generation === outputGeneration) handleTerminalText(term, stripped);
+        });
+      } else {
+        handleTerminalText(term, stripped);
+      }
+    };
+
+    const handleKittyTransfer = (term: Terminal, transfer: KittyGraphicsTransfer) => {
+      const generation = outputGeneration;
+      const displayOnly = replayingTerminalOutput;
+      flushQueuedTerminalText(term);
+      enqueueGraphicsWork(async () => {
+        try {
+          const normalized = await normalizeKittyTransfer(
+            transfer,
+            (request) => api.readKittyGraphicsSource(pane.id, request),
+          );
+          if (cancelled || removed || generation !== outputGeneration) return;
+          handleTerminalText(term, normalized);
+        } catch (error) {
+          if (cancelled || removed || generation !== outputGeneration) return;
+          const message = error instanceof Error ? error.message : "Kitty graphics processing failed";
+          showGraphicsDiagnostic({ protocol: "kitty", message });
+          const response = kittyErrorResponse(transfer, message);
+          if (response && !displayOnly) sendInput(socketRef.current, response, true);
+        }
+      });
+    };
+
     const handleOutput = (term: Terminal, data: string) => {
       const colorQueries = colorQueryParser.push(data, colorSchemeRef.current.terminal);
       if (!replayingTerminalOutput) {
@@ -854,17 +759,17 @@ export const TerminalPaneRuntime = memo(function TerminalPaneRuntime({
       const osc52 = osc52Controller.push(data, !replayingTerminalOutput);
       const bellCount = osc52.text.split("\x07").length - 1;
       if (bellCount > colorQueries.bellTerminators) onBell();
-      const parsed = kittyParserRef.current.push(osc52.text);
-      for (const event of parsed.events) {
+      const events = graphicsParserRef.current.push(osc52.text);
+      for (const event of events) {
         if (event.kind === "text") {
-          const text = stripWmuxControlSequences(wmuxControlCarryRef, event.text, (control) => {
-            if (control === "cursor=1") shellCursorPlacementRef.current = true;
-            if (control === "cursor=0") shellCursorPlacementRef.current = false;
-          });
-          if (text) handleTerminalText(term, text);
+          handleOrderedTerminalText(term, event.text);
         }
-        if (event.kind === "control") handleKittyControl(event.control);
-        if (event.kind === "graphic") handleKittyGraphic(event.graphic);
+        if (event.kind === "kitty") {
+          handleKittyTransfer(term, event.transfer);
+        }
+        if (event.kind === "diagnostic") {
+          showGraphicsDiagnostic(event.diagnostic);
+        }
       }
     };
 
@@ -875,6 +780,12 @@ export const TerminalPaneRuntime = memo(function TerminalPaneRuntime({
 
     const revealTerminal = (flushPendingWrite = false) => {
       const generation = revealGeneration;
+      if (pendingGraphicsWork > 0) {
+        void graphicsOutputChain.then(() => {
+          if (!cancelled && generation === revealGeneration) revealTerminal(true);
+        });
+        return;
+      }
       requestAnimationFrame(() => {
         if (cancelled || generation !== revealGeneration) return;
         const term = terminalRef.current;
@@ -923,10 +834,9 @@ export const TerminalPaneRuntime = memo(function TerminalPaneRuntime({
       outputCarryRef.current = "";
       osc52Controller.resetParser();
       colorQueryParser.reset();
-      kittyParserRef.current = new KittyGraphicsParser();
-      kittyPlaceholderStripRef.current.pendingPlaceholderMarks = false;
+      graphicsParserRef.current.reset();
       wmuxControlCarryRef.current = "";
-      pendingVirtualImageIdRef.current = undefined;
+      setGraphicsDiagnostic(null);
     };
     discardPendingOutputRef.current = resetPendingOutput;
 
@@ -1053,7 +963,7 @@ export const TerminalPaneRuntime = memo(function TerminalPaneRuntime({
             resetPendingOutput();
             osc52Controller.clearPending();
             term.clear();
-            setKittyInlineItems([]);
+            setGraphicsDiagnostic(null);
             if (message.replay) startReplayDrain(term, message.replay);
             else if (shouldWaitForDurableRefresh(message)) durableRefreshRevealGate?.begin();
             else revealTerminal();
@@ -1206,7 +1116,6 @@ export const TerminalPaneRuntime = memo(function TerminalPaneRuntime({
         document.fonts.addEventListener("loadingdone", fontLoadingDoneListener);
         void document.fonts.ready.then(() => fontLoadingDoneListener?.());
       }
-      scrollDisposable = term.onScroll((position) => setViewportY(position));
       renderDisposable = term.onRender(() => {
         terminalLatency.recordRender(pane.id, performance.now());
         verifyPredictionProbe(term);
@@ -1618,7 +1527,6 @@ export const TerminalPaneRuntime = memo(function TerminalPaneRuntime({
       socketController?.dispose();
       if (socketControllerRef.current === socketController) socketControllerRef.current = null;
       if (replayDrainTimer !== undefined) window.clearTimeout(replayDrainTimer);
-      scrollDisposable?.dispose();
       renderDisposable?.dispose();
       bufferDisposable?.dispose();
       if (terminalOutputTimer !== undefined) window.clearTimeout(terminalOutputTimer);
@@ -1838,6 +1746,20 @@ export const TerminalPaneRuntime = memo(function TerminalPaneRuntime({
             <span>{pendingLabel ?? startupLabel}</span>
           </div>
         ) : null}
+        {graphicsDiagnostic ? (
+          <div className="terminal-graphics-diagnostic" role="status" aria-live="polite">
+            <span>
+              [GRAPHICS WARN] {graphicsDiagnostic.protocol.toUpperCase()}: {graphicsDiagnostic.message}
+            </span>
+            <button
+              type="button"
+              aria-label="Dismiss graphics warning"
+              onClick={() => setGraphicsDiagnostic(null)}
+            >
+              [X]
+            </button>
+          </div>
+        ) : null}
         {(() => {
           void rectangleVersion;
           const range = rectangularSelectionRef.current?.visibleOverlay;
@@ -1855,24 +1777,6 @@ export const TerminalPaneRuntime = memo(function TerminalPaneRuntime({
             />
           );
         })()}
-        {visibleInlineItems.length > 0 ? (
-          <div className="kitty-inline-layer" aria-hidden="true">
-            {visibleInlineItems.map((item) => (
-              <img
-                key={item.id}
-                className="kitty-inline-image"
-                src={`data:${item.mimeType};base64,${item.data}`}
-                alt=""
-                style={{
-                  left: item.col * terminalMetrics.width,
-                  top: item.row * terminalMetrics.height,
-                  width: item.cols * terminalMetrics.width,
-                  height: item.rows * terminalMetrics.height,
-                }}
-              />
-            ))}
-          </div>
-        ) : null}
       </div>
       <div className="mobile-terminal-keys" role="toolbar" aria-label="Terminal keys">
         <button
@@ -1922,13 +1826,7 @@ export const TerminalPaneRuntime = memo(function TerminalPaneRuntime({
             <MediaPreview
               key={item.id}
               item={item}
-              onDismiss={() => {
-                if (item.id.startsWith("kitty_")) {
-                  setKittyMediaItems((items) => items.filter((candidate) => candidate.id !== item.id));
-                } else {
-                  onDismissMedia(item.id);
-                }
-              }}
+              onDismiss={() => onDismissMedia(item.id)}
             />
           ))}
         </div>

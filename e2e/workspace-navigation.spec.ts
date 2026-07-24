@@ -109,6 +109,39 @@ test("navigates, persists, filters, and moves nested workspaces", async ({ page,
   }
 });
 
+test("mobile sidebar opens and activates workspaces by touch", async ({ page, request }, testInfo) => {
+  test.skip(!testInfo.project.name.startsWith("mobile-"), "mobile-only touch coverage");
+  const { child, root } = await createNestedWorkspacePair(request);
+  const rootPath = `/workspaces/${root.id}/tabs/${root.activeTabId}`;
+  const childPath = `/workspaces/${child.id}/tabs/${child.activeTabId}`;
+  const navigation = page.getByRole("complementary", { name: "Workspace navigation" });
+  const navigationToggle = page.getByRole("banner", { name: "Mobile session controls" })
+    .getByRole("button", { name: /workspaces and hosts/i });
+  const rootItem = page.locator(`a[role="treeitem"][href="${rootPath}"]`);
+  const childItem = page.locator(`a[role="treeitem"][href="${childPath}"]`);
+
+  try {
+    await page.goto(rootPath);
+    await expect(page.locator("main.app-shell")).toBeVisible({ timeout: 20_000 });
+    await navigationToggle.tap();
+    await expect(navigation).toBeVisible();
+    await expect(childItem).toHaveAttribute("draggable", "false");
+
+    await childItem.tap();
+    await expect(page).toHaveURL(new RegExp(`${childPath}$`));
+    await expect(navigation).toBeHidden();
+
+    await navigationToggle.tap();
+    await expect(navigation).toBeVisible();
+    await rootItem.tap();
+    await expect(page).toHaveURL(new RegExp(`${rootPath}$`));
+    await expect(navigation).toBeHidden();
+  } finally {
+    await request.delete(`/api/workspaces/${child.id}`).catch(() => undefined);
+    await request.delete(`/api/workspaces/${root.id}`).catch(() => undefined);
+  }
+});
+
 test("keeps the loaded UI and recovers when a wake-up bootstrap briefly fails", async ({ page }) => {
   let failures = 0;
   let requests = 0;

@@ -76,6 +76,10 @@ test("interrupted keyboard and drawer transitions remain deterministic", () => {
     "keyboard-open-chrome-collapsed",
   );
   assert.equal(
+    transitionMobileInteraction("keyboard-open-chrome-collapsed", "drawer-opened"),
+    "drawer-open",
+  );
+  assert.equal(
     transitionMobileInteraction("drawer-closing-focus-return", "drawer-opened"),
     "drawer-open",
   );

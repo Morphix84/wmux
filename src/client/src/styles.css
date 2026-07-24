@@ -3400,13 +3400,6 @@ button.active-tool {
   pointer-events: none;
 }
 
-.kitty-inline-layer {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-  pointer-events: none;
-}
-
 .terminal-rectangle-selection {
   position: absolute;
   z-index: 2;
@@ -3414,11 +3407,34 @@ button.active-tool {
   pointer-events: none;
 }
 
-.kitty-inline-image {
+.terminal-graphics-diagnostic {
   position: absolute;
-  display: block;
-  object-fit: contain;
-  object-position: center;
+  z-index: 3;
+  right: 8px;
+  bottom: 8px;
+  display: flex;
+  max-width: min(620px, calc(100% - 16px));
+  align-items: flex-start;
+  gap: 10px;
+  padding: 5px 7px;
+  border: 1px solid var(--gold);
+  background: var(--black);
+  color: var(--gold);
+  font-family: var(--wmux-mono-font);
+  font-size: 10px;
+  line-height: 1.35;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.terminal-graphics-diagnostic button {
+  flex: 0 0 auto;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
 }
 
 .load-state,
@@ -5433,6 +5449,7 @@ button.active-tool {
     border-radius: 0;
     padding: 7px 8px 7px 6px;
     clip-path: none;
+    touch-action: manipulation;
   }
 
   .workspace-tree-row {

@@ -183,7 +183,9 @@ Keep websocket, media, clipboard, hook, and run endpoints behind the same networ
 - `wmux-windows-setup` is the Windows self-check/setup entry point. It validates helper state, can persist the helper directory to the user PATH, can install FFmpeg/Python with `winget`, installs `pywinpty` for ConPTY, and installs or reports the single per-user native-agent Scheduled Task that owns sessions, heartbeat, and capture supervision. It must work both inside a bootstrapped wmux pane and from plain SSH where `%LOCALAPPDATA%\wmux\bin` is not yet on `PATH`.
 - `wmux-windows-agent` is served as `wmux-windows-agent.py` plus a CMD shim. Its HTTP API owns sessions keyed by wmux pane id: create/attach, input, pywinpty-backed ConPTY resize, output long-poll, list, health, and delete. The base agent also owns registration heartbeat and on-demand stream-worker supervision, while rollout generations own neither. It must bind only loopback, Tailscale, or RFC1918/internal hosts. Its Scheduled Task uses both logon and once-per-minute triggers with `MultipleInstances: IgnoreNew`; this is intentional supervision for unexpected termination. Explicit `stop` must disable the base and generation tasks so they remain stopped.
 - Windows PowerShell bootstraps disable PSReadLine predictions to avoid inline history suggestions painting ghost text into browser terminal output.
-- Terminal-native image rendering is intentionally implemented around the terminal viewport as Kitty placeholder overlays. Keep product styling out of the terminal canvas/content area.
+- Terminal-native image rendering is owned by Ghostty's Kitty image storage and Canvas compositor.
+  Keep product styling out of the terminal canvas/content area.
+  File and shared-memory source normalization must stay pane-scoped, bounded, and tied to the live immutable machine snapshot.
 - `wmux-hooks install claude` mutates `~/.claude/settings.json` outside the repo. Merge hooks idempotently and preserve user settings.
 - The Claude hook installer also owns `~/.claude/skills/wmux/SKILL.md` only when it contains the wmux generated marker. Preserve any unmanaged skill at that path.
 - `wmux-hooks install codex` mutates `~/.codex/hooks.json` outside the repo. Codex command hooks require the user to review/trust them with `/hooks` before they run.
@@ -206,7 +208,8 @@ Keep websocket, media, clipboard, hook, and run endpoints behind the same networ
   Finer per-client capability grants are not implemented.
 - Dynamic host presence follows the host user's service lifecycle: the POSIX systemd user timer needs lingering to run while logged out, while Windows presence follows the supervised agent task and its selected `Interactive` or `S4U` logon mode.
 - Full cmux-style transcript auto-naming is heuristic. Claude, Codex, and POSIX OpenCode hook paths exist; Windows OpenCode installer parity is not implemented.
-- Kitty graphics support is partial. File/shared-memory transfer, animation frames, z-index layering, scrollback-persistent placement, Sixel, and iTerm2 image protocols are not complete.
+- Kitty graphics supports file, temporary-file, and POSIX shared-memory transfer plus native z-index and scrollback-persistent placement.
+  Animation frames, Windows named shared memory, Sixel, and iTerm2 image protocols remain unsupported and must fail with a visible diagnostic rather than silence.
 - Opt-in managed bash/zsh command tracking is best-effort and does not cover unsupported or non-wmux-managed shells.
   Use `wmux-run` when exact command boundaries are required.
 - Cwd preservation is best-effort outside tmux and wmux-managed shell bootstraps.
