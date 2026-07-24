@@ -93,6 +93,21 @@ export interface AgentEventResult {
   agentEvent: AgentActivity;
 }
 
+export const monotonicAgentTimestamp = (
+  previous: readonly (string | undefined)[],
+  nowMs = Date.now(),
+): string => {
+  const previousMs = previous.reduce((latest, value) => {
+    const parsed = value ? Date.parse(value) : Number.NaN;
+    return Number.isFinite(parsed) ? Math.max(latest, parsed) : latest;
+  }, Number.NEGATIVE_INFINITY);
+  return new Date(
+    Number.isFinite(previousMs)
+      ? Math.max(nowMs, previousMs + 1)
+      : nowMs,
+  ).toISOString();
+};
+
 export class AgentSessionService {
   constructor(
     private readonly state: StateStore,
@@ -136,7 +151,10 @@ export class AgentSessionService {
       const sessionId = cleanTimelineId(input.sessionId)
         || existingDelegation?.sessionId
         || runId;
-      const createdAt = new Date().toISOString();
+      const createdAt = monotonicAgentTimestamp([
+        existingDelegation?.updatedAt,
+        latestAgentEvent?.createdAt,
+      ]);
       if (ACTIVE_AGENT_STATUSES.has(status)) {
         const interruptedEvent = latestAgentEvent
           && latestAgentEvent.runId !== runId
