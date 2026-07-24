@@ -1,6 +1,7 @@
 import type { WebSocket } from "ws";
 import { resolveKeybindings } from "../shared/keybindings.js";
 import {
+  DEFAULT_DELEGATION_NOTIFICATION_BUDGET_SECONDS,
   DEFAULT_DELEGATION_WAIT_TIMEOUT_SECONDS,
   DEFAULT_TERMINAL_FONT_FAMILY,
   MAX_DELEGATION_WAIT_TIMEOUT_SECONDS,
@@ -32,6 +33,7 @@ import type {
 } from "./types.js";
 
 export const HEALTH_EPOCH_PROCESS_STRIDE = 1024;
+export const AGENT_NOTIFICATION_HEARTBEAT_MS = 15_000;
 
 export const healthEpochForProcessStart = (startedAtMs: number): number => {
   const epoch = Math.trunc(startedAtMs) * HEALTH_EPOCH_PROCESS_STRIDE;
@@ -70,6 +72,7 @@ interface EventBroadcastOptions {
   keybindings?: KeybindingMap;
   delegation?: DelegationConfig;
   refreshIntervals?: {
+    agentNotifications?: number;
     machines?: number;
     streams?: number;
   };
@@ -128,6 +131,8 @@ export class EventBroadcastRuntime {
   private lastPayload: BootstrapPayload;
   private readonly machineHealthTimer: NodeJS.Timeout;
   private readonly streamHealthTimer: NodeJS.Timeout;
+  private readonly agentNotificationTimer: NodeJS.Timeout;
+  private disposed = false;
 
   constructor(private readonly options: EventBroadcastOptions) {
     this.lastPayload = this.currentPayload();
@@ -152,8 +157,15 @@ export class EventBroadcastRuntime {
       ),
       options.refreshIntervals?.streams ?? 5_000,
     );
+    this.agentNotificationTimer = setInterval(
+      this.notifyExceededAgentBudgets,
+      options.refreshIntervals?.agentNotifications
+        ?? AGENT_NOTIFICATION_HEARTBEAT_MS,
+    );
     this.machineHealthTimer.unref();
     this.streamHealthTimer.unref();
+    this.agentNotificationTimer.unref();
+    queueMicrotask(this.notifyExceededAgentBudgets);
   }
 
   readonly currentPayload = () => {
@@ -180,6 +192,8 @@ export class EventBroadcastRuntime {
       delegation: this.options.delegation ?? {
         preferHeadless: false,
         waitTimeoutSeconds: DEFAULT_DELEGATION_WAIT_TIMEOUT_SECONDS,
+        notificationBudgetSeconds:
+          DEFAULT_DELEGATION_NOTIFICATION_BUDGET_SECONDS,
         waitTimeoutBoundsSeconds: {
           min: MIN_DELEGATION_WAIT_TIMEOUT_SECONDS,
           max: MAX_DELEGATION_WAIT_TIMEOUT_SECONDS,
@@ -318,8 +332,10 @@ export class EventBroadcastRuntime {
   }
 
   dispose(): void {
+    this.disposed = true;
     clearInterval(this.machineHealthTimer);
     clearInterval(this.streamHealthTimer);
+    clearInterval(this.agentNotificationTimer);
     this.options.state.off("change", this.onStateChange);
     this.options.agentSessions.timelines.off("change", this.onTimelineChange);
     this.options.settings.off("change", this.onSettingsChange);
@@ -338,6 +354,19 @@ export class EventBroadcastRuntime {
       }) => machine),
     );
   }
+
+  private readonly notifyExceededAgentBudgets = (): void => {
+    if (this.disposed) return;
+    try {
+      this.options.agentSessions.notifyExceededStateBudgets(
+        this.options.delegation?.notificationBudgetSeconds
+          ?? DEFAULT_DELEGATION_NOTIFICATION_BUDGET_SECONDS,
+      );
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      console.warn(`wmux: agent notification budget check failed: ${detail}`);
+    }
+  };
 
   private streamCatalogFingerprint(): string {
     return JSON.stringify(

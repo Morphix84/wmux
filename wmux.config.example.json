@@ -7,6 +7,10 @@
       "review": 1800,
       "change": 7200,
       "deploy": 7200
+    },
+    "notificationBudgetSeconds": {
+      "running": 7200,
+      "waiting": 300
     }
   },
   "keybindings": {

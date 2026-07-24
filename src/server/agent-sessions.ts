@@ -9,6 +9,7 @@ import type {
   AgentSessionTimeline,
   AgentTimelineSnapshotLink,
   DelegationAttentionReason,
+  DelegationNotificationBudgets,
   DelegationRecord,
   DelegationState,
   PersistedState,
@@ -305,6 +306,72 @@ export class AgentSessionService {
     );
   }
 
+  notifyExceededStateBudgets(
+    budgets: DelegationNotificationBudgets,
+    nowMs = Date.now(),
+  ): TerminalNotification[] {
+    const now = new Date(nowMs).toISOString();
+    const timelines = new Map(
+      this.timelines.snapshot().map((timeline) => [timeline.id, timeline]),
+    );
+    return this.state.commitMutation((persisted) => {
+      const notifications: TerminalNotification[] = [];
+      for (const delegation of persisted.delegations) {
+        if (
+          delegation.state !== "running"
+          && delegation.state !== "waiting"
+        ) {
+          continue;
+        }
+        const stateChangedAtMs = Date.parse(delegation.stateChangedAt);
+        if (
+          delegation.budgetNotifiedAt
+          || !Number.isFinite(stateChangedAtMs)
+          || nowMs - stateChangedAtMs
+            < budgets[delegation.state] * 1_000
+        ) {
+          continue;
+        }
+        const timeline = timelines.get(delegation.sessionId);
+        const transitionEntry = timeline?.entries
+          .slice()
+          .reverse()
+          .find(
+            (entry) =>
+              entry.state === delegation.state
+              && Date.parse(entry.createdAt) >= stateChangedAtMs,
+          ) ?? timeline?.entries.at(-1);
+        const notification: TerminalNotification = {
+          id: createId("note"),
+          workspaceId: delegation.workspaceId,
+          tabId: delegation.tabId,
+          paneId: delegation.paneId,
+          title: delegation.runtime,
+          subtitle: `${delegation.state} budget exceeded`,
+          body:
+            transitionEntry?.text
+            || delegation.summary
+            || delegation.title
+            || `${delegation.runtime} ${delegation.state}`,
+          createdAt: now,
+          read: false,
+        };
+        delegation.budgetNotifiedAt = now;
+        delegation.updatedAt = now;
+        notifications.push(notification);
+      }
+      if (notifications.length > 0) {
+        persisted.notifications.unshift(...notifications);
+        persisted.notifications = persisted.notifications.slice(0, 200);
+      }
+      return {
+        result: notifications,
+        changed: notifications.length > 0,
+        notifications,
+      };
+    });
+  }
+
   timelineSnapshot(): AgentSessionTimeline[] {
     return this.timelines.snapshot();
   }
@@ -571,6 +638,8 @@ const markLatestAgentInterrupted = (
       && DELEGATION_TRANSITIONS[delegation.state].includes("interrupted")
     ) {
       delegation.state = "interrupted";
+      delegation.stateChangedAt = interruptedAt;
+      delete delegation.budgetNotifiedAt;
       delegation.summary = latest.summary;
       delegation.error = latest.summary;
       delegation.updatedAt = interruptedAt;
@@ -631,6 +700,7 @@ const recordDelegationEvent = (
         tabId: event.tabId,
         paneId: event.paneId,
         ...(machineId ? { machineId } : {}),
+        stateChangedAt: event.createdAt,
         createdAt: event.createdAt,
         updatedAt: event.createdAt,
       });
@@ -670,6 +740,7 @@ const recordDelegationEvent = (
   const detail = message || event.summary;
   const previousAttentionReason = existing?.attentionReason;
   const machineId = targetMachineId(state, event);
+  const stateChanged = !existing || existing.state !== nextState;
   const nextAttentionReason = nextState === "waiting"
     ? attentionReason ?? "input"
     : attentionReason === "blocked"
@@ -688,6 +759,7 @@ const recordDelegationEvent = (
     tabId: event.tabId,
     paneId: event.paneId,
     ...(machineId ? { machineId } : {}),
+    stateChangedAt: event.createdAt,
     createdAt: event.createdAt,
     updatedAt: event.createdAt,
   };
@@ -700,6 +772,10 @@ const recordDelegationEvent = (
   delegation.tabId = event.tabId;
   delegation.paneId = event.paneId;
   delegation.machineId = machineId ?? delegation.machineId;
+  if (stateChanged) {
+    delegation.stateChangedAt = event.createdAt;
+    delete delegation.budgetNotifiedAt;
+  }
   delegation.updatedAt = event.createdAt;
   if (nextAttentionReason) delegation.attentionReason = nextAttentionReason;
   else delete delegation.attentionReason;

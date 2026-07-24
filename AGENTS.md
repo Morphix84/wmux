@@ -83,6 +83,8 @@ Keep websocket, media, clipboard, hook, and run endpoints behind the same networ
   `AgentTimelineStore` owns session turns, prompts, lifecycle entries, and archived review links; mobile Chat must render this durable history without requiring a terminal attachment.
   Delegations retain the pane-local machine ID so the fleet remains intelligible after workspace removal.
   Approval, login, blocked, and input-required transitions are explicit attention reasons; keep their notifications exact-once and sort them above ordinary running work.
+  `stateChangedAt` is the authoritative state-age clock.
+  Budget notifications must persist their exact-once marker, include the transition timeline entry, and run within the 15-second agent-notification heartbeat.
   Runtime-specific argv, structured output, and TUI marker behavior belong in the Codex, Claude, and OpenCode adapters under `src/server/agent-runtimes/`.
   Keep `delegation.preferHeadless` defaulting to `false`; interactive requests always use TUI adapters.
 - `SessionBackend` is the pane execution contract.

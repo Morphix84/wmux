@@ -7,7 +7,7 @@ import type {
   PersistedState,
 } from "./types.js";
 
-export const CURRENT_STATE_SCHEMA_VERSION = 5;
+export const CURRENT_STATE_SCHEMA_VERSION = 6;
 
 export class UnsupportedStateVersionError extends Error {
   constructor(readonly version: number) {
@@ -127,6 +127,8 @@ const delegationSchema: z.ZodType<DelegationRecord> = z.object({
   tabId: idSchema,
   paneId: idSchema,
   machineId: idSchema.optional(),
+  stateChangedAt: timestampSchema,
+  budgetNotifiedAt: timestampSchema.optional(),
   createdAt: timestampSchema,
   updatedAt: timestampSchema,
 }).strict();
@@ -366,6 +368,29 @@ export const migrateV4ToV5State = (record: Record<string, unknown>): Record<stri
     : record.delegations,
 });
 
+/** v5 delegations gain durable state-age and budget-notification timestamps. */
+export const migrateV5ToV6State = (
+  record: Record<string, unknown>,
+): Record<string, unknown> => ({
+  ...record,
+  schemaVersion: 6,
+  delegations: Array.isArray(record.delegations)
+    ? record.delegations.map((delegation) => {
+      if (!delegation || typeof delegation !== "object" || Array.isArray(delegation)) {
+        return delegation;
+      }
+      const delegationRecord = delegation as Record<string, unknown>;
+      return {
+        ...delegationRecord,
+        stateChangedAt:
+          typeof delegationRecord.stateChangedAt === "string"
+            ? delegationRecord.stateChangedAt
+            : delegationRecord.updatedAt,
+      };
+    })
+    : record.delegations,
+});
+
 export const parsePersistedState = (input: unknown): ParsedPersistedState => {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw new Error("state must be a JSON object");
@@ -382,6 +407,7 @@ export const parsePersistedState = (input: unknown): ParsedPersistedState => {
     && rawVersion !== 2
     && rawVersion !== 3
     && rawVersion !== 4
+    && rawVersion !== 5
     && rawVersion !== CURRENT_STATE_SCHEMA_VERSION
   ) {
     throw new Error("state schemaVersion must be a supported integer");
@@ -396,9 +422,12 @@ export const parsePersistedState = (input: unknown): ParsedPersistedState => {
   const v4Candidate = rawVersion !== undefined && rawVersion >= 4
     ? record
     : migrateV3ToV4State(v3Candidate);
-  const candidate = rawVersion === CURRENT_STATE_SCHEMA_VERSION
+  const v5Candidate = rawVersion !== undefined && rawVersion >= 5
     ? record
     : migrateV4ToV5State(v4Candidate);
+  const candidate = rawVersion === CURRENT_STATE_SCHEMA_VERSION
+    ? record
+    : migrateV5ToV6State(v5Candidate);
   return { state: persistedStateSchema.parse(candidate), migrated };
 };
 

@@ -57,7 +57,11 @@ export const createHttpServer = (
     registrationToken?: string;
     trustedProxies?: ReadonlySet<string>;
     terminalFontFamily?: string;
-    healthRefreshIntervals?: { machines?: number; streams?: number };
+    healthRefreshIntervals?: {
+      agentNotifications?: number;
+      machines?: number;
+      streams?: number;
+    };
     healthResolvers?: {
       machines?: typeof resolveMachineStatuses;
       streams?: typeof resolveStreamStatuses;

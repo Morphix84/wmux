@@ -208,6 +208,10 @@ cp wmux.config.example.json wmux.config.json
   Restart wmux after changing these startup-loaded values so `/api/bootstrap` publishes them to the CLI and generated plugin.
 - `delegation.preferHeadless` opts non-interactive delegation into runtime-specific structured/headless adapters when one is available.
   It defaults to `false`, and interactive TUI work always remains terminal-attached.
+- `delegation.notificationBudgetSeconds` sets running and waiting state-age budgets.
+  Defaults are 7,200 seconds for running and 300 seconds for waiting, with accepted values from 1 second through 7 days.
+  wmux checks these budgets every 15 seconds and emits one durable browser notification per exceeded state interval.
+  A later state transition starts a fresh interval.
 - wmux adds the local machine unless `"localMachine": false` is set.
 - `kind: "local"` always executes on the current wmux server. Its display
   name does not make it a remote target, and its `cwd` must exist on that
@@ -590,6 +594,8 @@ If the controller wait expires or pane output becomes unreadable after submissio
 The controller does not send Ctrl-C or close the workspace on observation loss.
 An installed worker hook can later reconcile the same run to success or worker failure through the durable ledger, including after a controller or wmux restart.
 The first worker terminal outcome wins, so repeated or conflicting completion notices cannot duplicate notifications or regress the record.
+Agent notifications are emitted from lifecycle transitions for attention and terminal states.
+Budget alerts include the durable timeline entry that put the agent into its current state.
 Query `GET /api/delegations/:runId` to reconcile a detached run.
 Failed, stopped, waiting, and controller-detached workspaces remain available for inspection.
 The permission-gated `wmux_close` tool accepts `workspace_id` to explicitly close a workspace later, but refuses anything not recorded as agent-created.

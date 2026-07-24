@@ -97,6 +97,7 @@ const delegation = (
   tabId,
   paneId,
   machineId: runId.includes("remote") ? "remote" : "local",
+  stateChangedAt: updatedAt,
   createdAt: "2026-01-01T00:00:00.000Z",
   updatedAt,
 });

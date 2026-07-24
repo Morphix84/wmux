@@ -248,6 +248,10 @@ test("version 4 delegations migrate explicit fleet attention reasons", () => {
       agentsFor(migrated).delegationForRun("run-version-4")?.machineId,
       "local",
     );
+    assert.equal(
+      agentsFor(migrated).delegationForRun("run-version-4")?.stateChangedAt,
+      agentsFor(migrated).delegationForRun("run-version-4")?.updatedAt,
+    );
     assert.equal(migrated.snapshot().schemaVersion, CURRENT_STATE_SCHEMA_VERSION);
   });
 });

@@ -40,10 +40,22 @@ export const DEFAULT_DELEGATION_WAIT_TIMEOUT_SECONDS: Record<DelegationMode, num
   change: 7_200,
   deploy: 7_200,
 };
+export const DEFAULT_DELEGATION_NOTIFICATION_BUDGET_SECONDS = {
+  running: 7_200,
+  waiting: 300,
+} as const;
+export const MIN_DELEGATION_NOTIFICATION_BUDGET_SECONDS = 1;
+export const MAX_DELEGATION_NOTIFICATION_BUDGET_SECONDS = 7 * 24 * 60 * 60;
+
+export interface DelegationNotificationBudgets {
+  running: number;
+  waiting: number;
+}
 
 export interface DelegationConfig {
   preferHeadless: boolean;
   waitTimeoutSeconds: Record<DelegationMode, number>;
+  notificationBudgetSeconds: DelegationNotificationBudgets;
   waitTimeoutBoundsSeconds: {
     min: number;
     max: number;
@@ -351,6 +363,8 @@ export interface DelegationRecord {
   tabId: string;
   paneId: string;
   machineId?: string;
+  stateChangedAt: string;
+  budgetNotifiedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
