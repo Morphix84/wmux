@@ -132,6 +132,22 @@ export interface AuthInfo {
   browserAuthMode: "shared-or-login" | "login-only";
 }
 
+export interface BrowserSessionMetadata {
+  id: string;
+  issuedAt: number;
+  expiresAt: number;
+  lastSeenAt: number;
+  device: string;
+  address: string;
+}
+
+export interface ScopedCredentialMetadata {
+  kind: "automation" | "helper";
+  issuedAt: number;
+  expiresAt: number;
+  rotatable: boolean;
+}
+
 export const api = {
   bootstrap: () => json<BootstrapPayload>("/api/bootstrap"),
   authInfo: async (): Promise<AuthInfo> => {
@@ -140,6 +156,25 @@ export const api = {
     return response.json() as Promise<AuthInfo>;
   },
   authSession: () => json<{ authenticated: true }>("/api/auth/session"),
+  browserSessions: () =>
+    json<{
+      currentSessionId?: string;
+      sessions: BrowserSessionMetadata[];
+    }>("/api/auth/sessions"),
+  revokeBrowserSession: (sessionId: string) =>
+    json<{ revoked: true }>(
+      `/api/auth/sessions/${encodeURIComponent(sessionId)}`,
+      { method: "DELETE" },
+    ),
+  scopedCredentials: () =>
+    json<{ credentials: ScopedCredentialMetadata[] }>(
+      "/api/auth/credentials",
+    ),
+  rotateScopedCredential: (kind: ScopedCredentialMetadata["kind"]) =>
+    json<{ credential: ScopedCredentialMetadata }>(
+      `/api/auth/credentials/${kind}/rotate`,
+      { method: "POST" },
+    ),
   login: async (
     username: string,
     password: string,

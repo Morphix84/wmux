@@ -7,6 +7,7 @@ import { AgentFollowUpService } from "./agent-follow-up.js";
 import { AgentSessionService } from "./agent-sessions.js";
 import type { AuthConfig } from "./auth.js";
 import { BrowserSessionStore } from "./browser-session-store.js";
+import { ScopedCredentialStore } from "./scoped-credential-store.js";
 import {
   EventBroadcastRuntime,
   HEALTH_EPOCH_PROCESS_STRIDE,
@@ -76,6 +77,7 @@ export const createHttpServer = (
     agentFollowUps?: AgentFollowUpService;
     delegation?: DelegationConfig;
     browserSessions?: BrowserSessionStore;
+    scopedCredentials?: ScopedCredentialStore;
     browserSessionCookieSecure?: boolean;
   },
 ): Promise<WmuxHttpServer> => {
@@ -99,6 +101,14 @@ export const createHttpServer = (
       ?? BrowserSessionStore.persistent(
         auth.sessionSecret,
         path.join(state.storageDirectory(), "browser-sessions.json"),
+      )
+    : undefined;
+  const scopedCredentials = auth.enabled
+    && (auth.automationToken || auth.helperToken)
+    ? options.scopedCredentials
+      ?? new ScopedCredentialStore(
+        auth,
+        path.join(state.storageDirectory(), "scoped-credentials.json"),
       )
     : undefined;
   const currentMachines = typeof machineSource === "function" ? machineSource : () => machineSource;
@@ -148,6 +158,7 @@ export const createHttpServer = (
     bindHost,
     auth,
     browserSessions,
+    scopedCredentials,
     browserSessionCookieSecure,
     agentFollowUps,
     agentSessions,
@@ -191,6 +202,7 @@ export const createHttpServer = (
     protocol,
     auth,
     browserSessions,
+    scopedCredentials,
     registrationToken,
     hostRegistry,
     currentMachines,
@@ -223,6 +235,8 @@ export const createHttpServer = (
     protocol,
     auth,
     browserSessions,
+    scopedCredentials,
+    trustedProxies,
     dev: Boolean(options.dev),
     sessions,
     currentMachines,

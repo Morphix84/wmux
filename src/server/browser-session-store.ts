@@ -4,9 +4,11 @@ import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
 
-export const CURRENT_BROWSER_SESSION_SCHEMA_VERSION = 1;
+export const CURRENT_BROWSER_SESSION_SCHEMA_VERSION = 2;
 const MAX_BROWSER_SESSIONS = 1_000;
 const SESSION_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+const MAX_SESSION_LABEL_LENGTH = 256;
+const LAST_SEEN_WRITE_INTERVAL_MS = 60_000;
 
 const defaultBrowserSessionPath = (): string =>
   path.join(os.homedir(), ".wmux", "browser-sessions.json");
@@ -16,6 +18,19 @@ const browserSessionRecordSchema = z.object({
   tokenDigest: z.string().regex(/^[a-f0-9]{64}$/),
   issuedAt: z.number().int().nonnegative(),
   expiresAt: z.number().int().positive(),
+  lastSeenAt: z.number().int().nonnegative(),
+  device: z.string().min(1).max(MAX_SESSION_LABEL_LENGTH),
+  address: z.string().min(1).max(MAX_SESSION_LABEL_LENGTH),
+}).strict();
+
+const legacyBrowserSessionEnvelopeSchema = z.object({
+  schemaVersion: z.literal(1),
+  sessions: z.array(z.object({
+    id: z.string().min(1).max(128),
+    tokenDigest: z.string().regex(/^[a-f0-9]{64}$/),
+    issuedAt: z.number().int().nonnegative(),
+    expiresAt: z.number().int().positive(),
+  }).strict()).max(MAX_BROWSER_SESSIONS),
 }).strict();
 
 const browserSessionEnvelopeSchema = z.object({
@@ -28,6 +43,9 @@ export interface BrowserSessionRecord {
   tokenDigest: string;
   issuedAt: number;
   expiresAt: number;
+  lastSeenAt: number;
+  device: string;
+  address: string;
 }
 
 export interface IssuedBrowserSession {
@@ -35,6 +53,20 @@ export interface IssuedBrowserSession {
   token: string;
   issuedAt: number;
   expiresAt: number;
+}
+
+export interface BrowserSessionMetadata {
+  id: string;
+  issuedAt: number;
+  expiresAt: number;
+  lastSeenAt: number;
+  device: string;
+  address: string;
+}
+
+export interface BrowserSessionObservation {
+  device?: string;
+  address?: string;
 }
 
 interface BrowserSessionEnvelope {
@@ -53,6 +85,7 @@ export class UnsupportedBrowserSessionVersionError extends Error {
 
 export class BrowserSessionStore {
   private sessions: BrowserSessionRecord[];
+  private readonly revocationListeners = new Set<(sessionId: string) => void>();
 
   constructor(
     private readonly secret: string,
@@ -70,7 +103,11 @@ export class BrowserSessionStore {
     return new BrowserSessionStore(secret, filePath);
   }
 
-  issue(ttlMs: number, nowMs = Date.now()): IssuedBrowserSession {
+  issue(
+    ttlMs: number,
+    nowMs = Date.now(),
+    observation: BrowserSessionObservation = {},
+  ): IssuedBrowserSession {
     this.pruneExpired(nowMs);
     const token = crypto.randomBytes(32).toString("base64url");
     const record: BrowserSessionRecord = {
@@ -78,6 +115,9 @@ export class BrowserSessionStore {
       tokenDigest: this.digest(token),
       issuedAt: nowMs,
       expiresAt: nowMs + ttlMs,
+      lastSeenAt: nowMs,
+      device: this.normalizeLabel(observation.device, "Unknown browser"),
+      address: this.normalizeLabel(observation.address, "unknown"),
     };
     this.sessions.push(record);
     this.sessions = this.sessions
@@ -95,6 +135,7 @@ export class BrowserSessionStore {
   authenticate(
     token: string | null,
     nowMs = Date.now(),
+    observation: BrowserSessionObservation = {},
   ): BrowserSessionRecord | undefined {
     if (!token || !SESSION_TOKEN_PATTERN.test(token)) return undefined;
     const tokenDigest = this.digest(token);
@@ -109,7 +150,43 @@ export class BrowserSessionStore {
       this.persist();
       return undefined;
     }
+    const device = this.normalizeLabel(observation.device, record.device);
+    const address = this.normalizeLabel(observation.address, record.address);
+    if (
+      device !== record.device
+      || address !== record.address
+      || nowMs - record.lastSeenAt >= LAST_SEEN_WRITE_INTERVAL_MS
+    ) {
+      record.device = device;
+      record.address = address;
+      record.lastSeenAt = nowMs;
+      this.persist();
+    }
     return structuredClone(record);
+  }
+
+  list(nowMs = Date.now()): BrowserSessionMetadata[] {
+    this.pruneExpired(nowMs);
+    return this.sessions
+      .slice()
+      .sort((left, right) => right.lastSeenAt - left.lastSeenAt)
+      .map(({ tokenDigest: _tokenDigest, ...metadata }) =>
+        structuredClone(metadata)
+      );
+  }
+
+  revoke(sessionId: string): boolean {
+    const retained = this.sessions.filter((session) => session.id !== sessionId);
+    if (retained.length === this.sessions.length) return false;
+    this.sessions = retained;
+    this.persist();
+    for (const listener of this.revocationListeners) listener(sessionId);
+    return true;
+  }
+
+  onRevoke(listener: (sessionId: string) => void): () => void {
+    this.revocationListeners.add(listener);
+    return () => this.revocationListeners.delete(listener);
   }
 
   private digest(token: string): string {
@@ -117,6 +194,11 @@ export class BrowserSessionStore {
       .createHmac("sha256", this.secret)
       .update(token)
       .digest("hex");
+  }
+
+  private normalizeLabel(value: string | undefined, fallback: string): string {
+    const normalized = value?.replace(/[\u0000-\u001f\u007f]/g, " ").trim();
+    return (normalized || fallback).slice(0, MAX_SESSION_LABEL_LENGTH);
   }
 
   private pruneExpired(nowMs: number): void {
@@ -167,6 +249,18 @@ export class BrowserSessionStore {
         && version > CURRENT_BROWSER_SESSION_SCHEMA_VERSION
       ) {
         throw new UnsupportedBrowserSessionVersionError(version);
+      }
+      if (version === 1) {
+        const legacy = legacyBrowserSessionEnvelopeSchema.parse(input);
+        return {
+          schemaVersion: CURRENT_BROWSER_SESSION_SCHEMA_VERSION,
+          sessions: legacy.sessions.map((session) => ({
+            ...session,
+            lastSeenAt: session.issuedAt,
+            device: "Unknown browser",
+            address: "unknown",
+          })),
+        };
       }
       return browserSessionEnvelopeSchema.parse(input);
     } catch (error) {

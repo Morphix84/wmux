@@ -27,6 +27,10 @@ import { useOpenTuiTheme, type OpenTuiTheme } from "./color-scheme-context";
 import { compileKeybindings, eventMatchesAction } from "../../shared/keybindings";
 import { MAX_TERMINAL_FONT_SIZE, MIN_TERMINAL_FONT_SIZE } from "./types";
 import type { DurableSessionAudit, KeybindingMap, MachineStatus, WmuxSettings } from "./types";
+import type {
+  BrowserSessionMetadata,
+  ScopedCredentialMetadata,
+} from "./api";
 
 interface OpenTuiSettingsModalProps {
   machines: MachineStatus[];
@@ -35,6 +39,12 @@ interface OpenTuiSettingsModalProps {
   sessionAudit: DurableSessionAudit | null;
   sessionAuditError: string;
   sessionAuditLoading: boolean;
+  browserSessions: BrowserSessionMetadata[];
+  currentSessionId?: string;
+  scopedCredentials: ScopedCredentialMetadata[];
+  securityAvailable: boolean;
+  securityLoading: boolean;
+  securityError: string;
   saving: boolean;
   keybindings: KeybindingMap;
   appleKeybindings: boolean;
@@ -49,11 +59,13 @@ interface OpenTuiSettingsModalProps {
     name: string,
     cleanupKey?: string,
   ) => void | Promise<void>;
+  onRevokeBrowserSession: (session: BrowserSessionMetadata) => void | Promise<void>;
+  onRotateScopedCredential: (credential: ScopedCredentialMetadata) => void | Promise<void>;
 }
 
 type FieldId = "font" | "scrollback" | `alias:${string}`;
 type ChoiceId = "scheme" | "inactive-streaming" | "frame-rate" | "terminal-scroll";
-type FocusId = FieldId | ChoiceId | "manage" | "dom" | "close" | "audit" | "reset" | "cancel" | "save" | `cleanup:${string}`;
+type FocusId = FieldId | ChoiceId | "manage" | "dom" | "close" | "audit" | "reset" | "cancel" | "save" | `cleanup:${string}` | `revoke:${string}` | `rotate:${string}`;
 
 interface EditState {
   id: FieldId;
@@ -124,6 +136,7 @@ interface LayoutAuditRow {
   status: string;
   meta: string;
   detail: string;
+  actionLabel?: string;
   start: number;
   height: number;
 }
@@ -165,6 +178,12 @@ export function OpenTuiSettingsModal({
   sessionAudit,
   sessionAuditError,
   sessionAuditLoading,
+  browserSessions,
+  currentSessionId,
+  scopedCredentials,
+  securityAvailable,
+  securityLoading,
+  securityError,
   saving,
   keybindings,
   appleKeybindings,
@@ -175,6 +194,8 @@ export function OpenTuiSettingsModal({
   onUseDomFallback,
   onRunSessionAudit,
   onCleanupSession,
+  onRevokeBrowserSession,
+  onRotateScopedCredential,
 }: OpenTuiSettingsModalProps) {
   const theme = useOpenTuiTheme();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -197,8 +218,32 @@ export function OpenTuiSettingsModal({
   }, []);
 
   const layout = useMemo(
-    () => buildLayout(machines, draft, sessionAudit, sessionAuditError, sessionAuditLoading),
-    [draft, machines, sessionAudit, sessionAuditError, sessionAuditLoading],
+    () => buildLayout(
+      machines,
+      draft,
+      sessionAudit,
+      sessionAuditError,
+      sessionAuditLoading,
+      browserSessions,
+      currentSessionId,
+      scopedCredentials,
+      securityAvailable,
+      securityLoading,
+      securityError,
+    ),
+    [
+      browserSessions,
+      currentSessionId,
+      draft,
+      machines,
+      scopedCredentials,
+      securityAvailable,
+      securityError,
+      securityLoading,
+      sessionAudit,
+      sessionAuditError,
+      sessionAuditLoading,
+    ],
   );
   const visibleContentRows = Math.max(1, viewportRows - 7);
   const maxScrollOffset = Math.max(0, layout.totalRows - visibleContentRows);
@@ -356,6 +401,18 @@ export function OpenTuiSettingsModal({
       if (backend === "tmux" || backend === "screen" || backend === "agent") {
         await onCleanupSession(backend, name, cleanupKey ?? undefined);
       }
+      return;
+    }
+    if (id.startsWith("revoke:")) {
+      const sessionId = decodeURIComponent(id.slice("revoke:".length));
+      const session = browserSessions.find((candidate) => candidate.id === sessionId);
+      if (session) await onRevokeBrowserSession(session);
+      return;
+    }
+    if (id.startsWith("rotate:")) {
+      const kind = id.slice("rotate:".length);
+      const credential = scopedCredentials.find((candidate) => candidate.kind === kind);
+      if (credential) await onRotateScopedCredential(credential);
       return;
     }
     if (isFieldId(id)) startEditing(id);
@@ -536,6 +593,12 @@ const buildLayout = (
   sessionAudit: DurableSessionAudit | null,
   sessionAuditError: string,
   sessionAuditLoading: boolean,
+  browserSessions: BrowserSessionMetadata[],
+  currentSessionId: string | undefined,
+  scopedCredentials: ScopedCredentialMetadata[],
+  securityAvailable: boolean,
+  securityLoading: boolean,
+  securityError: string,
 ): SettingsLayout => {
   const items: LayoutItem[] = [];
   const focusableIds: FocusId[] = ["manage", "dom", "close"];
@@ -598,6 +661,38 @@ const buildLayout = (
       placeholder: machine.id,
       height: 2,
     });
+  }
+
+  push({ kind: "section", title: "SESSIONS AND CREDENTIALS", height: 2 });
+  if (securityLoading && !securityAvailable) {
+    push({ kind: "message", text: "loading security inventory", tone: "muted", height: 2 });
+  } else if (!securityAvailable && !securityError) {
+    push({ kind: "message", text: "available with login-only browser authentication", tone: "muted", height: 2 });
+  }
+  if (securityError) push({ kind: "message", text: securityError, tone: "error", height: 2 });
+  if (securityAvailable) {
+    for (const session of browserSessions) {
+      push({
+        kind: "audit-row",
+        id: `revoke:${encodeURIComponent(session.id)}`,
+        status: session.id === currentSessionId ? "current" : "session",
+        meta: `${session.device} @ ${session.address}`,
+        detail: `issued ${formatTimestamp(session.issuedAt)} / seen ${formatTimestamp(session.lastSeenAt)}`,
+        actionLabel: "revoke",
+        height: 2,
+      });
+    }
+    for (const credential of scopedCredentials) {
+      push({
+        kind: "audit-row",
+        id: credential.rotatable ? `rotate:${credential.kind}` : undefined,
+        status: credential.kind,
+        meta: `issued ${formatTimestamp(credential.issuedAt)}`,
+        detail: `expires ${formatTimestamp(credential.expiresAt)}${credential.rotatable ? "" : " / environment-backed"}`,
+        actionLabel: credential.rotatable ? "rotate" : undefined,
+        height: 2,
+      });
+    }
   }
 
   push({ kind: "section", title: "DURABLE SESSIONS", height: 2 });
@@ -720,7 +815,9 @@ const drawSettings = (
       write(row, 2, item.status.toUpperCase(), statusColor(item.status, theme), 700);
       write(row, 14, item.meta, selected ? rgba.text : rgba.muted, selected ? 700 : 600);
       write(row + 1, 14, item.detail, rgba.faint, 400);
-      if (item.id && item.backend && item.name) {
+      if (item.id && item.actionLabel) {
+        drawButton(grid, row, Math.max(2, cols - item.actionLabel.length - 4), item.actionLabel, selected, hits, item.id, "activate", theme);
+      } else if (item.id && item.backend && item.name) {
         drawButton(grid, row, Math.max(2, cols - 9), "quit", selected, hits, item.id, "activate", theme);
       }
     }
@@ -918,3 +1015,6 @@ const statusColor = (status: string, { rgba }: OpenTuiTheme): RGBA => {
 };
 
 const modulo = (value: number, divisor: number): number => ((value % divisor) + divisor) % divisor;
+
+const formatTimestamp = (timestamp: number): string =>
+  new Date(timestamp).toLocaleString();

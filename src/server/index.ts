@@ -112,7 +112,7 @@ const main = async (): Promise<void> => {
     () => hostRegistry.sweep(),
     undefined,
     () => terminalThemeEnvironment(settings.snapshot().colorScheme),
-    auth.helperToken ?? "",
+    () => auth.helperToken ?? "",
     auth.browserAuthMode ?? "shared-or-login",
     agentSessions,
   );

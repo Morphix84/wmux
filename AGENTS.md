@@ -104,6 +104,8 @@ Keep websocket, media, clipboard, hook, and run endpoints behind the same networ
 - Browser authentication defaults to compatibility-preserving `shared-or-login`.
   Opt-in `login-only` requires password-issued browser sessions plus distinct header-only automation and helper credentials, enforced through the exact REST method/path and WebSocket policy.
   Login-only browser sessions use opaque HttpOnly SameSite cookies backed by owner-only server records; browser WebSockets authenticate through the cookie and must not receive credentials in query parameters or local storage.
+  Browser-session records include bounded client metadata, and revocation must synchronously terminate every WebSocket mapped to the revoked session.
+  Automation and helper credentials have persisted issue/expiry metadata and file-backed atomic rotation; authentication must consult the live credential store so old values fail immediately without changing exact-route authority.
 - Expired registered hosts remain visible offline and are retained past the normal seven-day window while a pane references them. A referenced ID pins kind/user/port/shell/backend/agent port/token while permitting address-only roaming; a live agent pane pins its address too. Do not dial an offline registration for new attach/refresh. Live pane sessions retain their original machine snapshot so address churn cannot redirect later cleanup.
 - Keep remote-machine behavior explicit in `MachineConfig`; do not hide durable/session behavior in UI-only state.
 - The `local` and SSH machines default to durable `tmux`/`screen` sessions via `sessionBackend: "auto"`.
@@ -198,7 +200,8 @@ Keep websocket, media, clipboard, hook, and run endpoints behind the same networ
 - Static machine management is available through the settings editor and persists to `~/.wmux/config.json` with atomic validation and owner-only permissions.
   Machine IDs remain immutable, aliases are mutable, and registration, agent, and stream tokens stay outside the browser editor.
 - Optional login-only authentication separates browser, automation, helper, registration, and registered-host credentials, and browser sessions use server-backed HttpOnly SameSite cookies.
-  Session revocation, a client/session inventory, and expiring automation/helper credentials are not implemented; scoped automation/helper credentials remain long-lived within their exact route authorities.
+  The settings security panel inventories and revokes browser sessions and rotates expiring file-backed automation/helper credentials.
+  Finer per-client capability grants are not implemented.
 - Dynamic host presence follows the host user's service lifecycle: the POSIX systemd user timer needs lingering to run while logged out, while Windows presence follows the supervised agent task and its selected `Interactive` or `S4U` logon mode.
 - Full cmux-style transcript auto-naming is heuristic. Claude, Codex, and POSIX OpenCode hook paths exist; Windows OpenCode installer parity is not implemented.
 - Kitty graphics support is partial. File/shared-memory transfer, animation frames, z-index layering, scrollback-persistent placement, Sixel, and iTerm2 image protocols are not complete.

@@ -15,6 +15,8 @@ import type {
 } from "./types.js";
 import { classifyWebSocket } from "./websocket-route.js";
 import type { BrowserSessionStore } from "./browser-session-store.js";
+import type { ScopedCredentialStore } from "./scoped-credential-store.js";
+import { normalizeIpAddress, observedClientAddress } from "./proxy-address.js";
 
 interface WebSocketUpgradeOptions {
   server: http.Server | https.Server;
@@ -22,6 +24,8 @@ interface WebSocketUpgradeOptions {
   protocol: "http" | "https";
   auth: AuthConfig;
   browserSessions?: BrowserSessionStore;
+  scopedCredentials?: ScopedCredentialStore;
+  trustedProxies: ReadonlySet<string>;
   dev: boolean;
   sessions: SessionManager;
   currentMachines: () => MachineConfig[];
@@ -80,6 +84,28 @@ export const installWebSocketUpgrade = (
   options: WebSocketUpgradeOptions,
 ): void => {
   const wss = new WebSocketServer({ noServer: true });
+  const sessionSockets = new Map<string, Set<import("ws").WebSocket>>();
+  const registerSessionSocket = (
+    ws: import("ws").WebSocket,
+    sessionId: string | undefined,
+  ): void => {
+    if (!sessionId) return;
+    const sockets = sessionSockets.get(sessionId) ?? new Set();
+    sockets.add(ws);
+    sessionSockets.set(sessionId, sockets);
+    ws.once("close", () => {
+      sockets.delete(ws);
+      if (sockets.size === 0) sessionSockets.delete(sessionId);
+    });
+  };
+  const stopRevocationListener = options.browserSessions?.onRevoke(
+    (sessionId) => {
+      const sockets = sessionSockets.get(sessionId);
+      if (!sockets) return;
+      for (const ws of sockets) ws.terminate();
+      sessionSockets.delete(sessionId);
+    },
+  );
   const aliveSockets = new WeakSet<import("ws").WebSocket>();
   const markAlive = (ws: import("ws").WebSocket): void => {
     aliveSockets.add(ws);
@@ -100,7 +126,10 @@ export const installWebSocketUpgrade = (
     }
   }, 30_000);
   heartbeat.unref();
-  options.server.on("close", () => clearInterval(heartbeat));
+  options.server.on("close", () => {
+    clearInterval(heartbeat);
+    stopRevocationListener?.();
+  });
 
   options.server.on("upgrade", (request, socket, head) => {
     if (
@@ -128,6 +157,15 @@ export const installWebSocketUpgrade = (
       url,
       Date.now(),
       options.browserSessions,
+      options.scopedCredentials,
+      {
+        device: typeof request.headers["user-agent"] === "string"
+          ? request.headers["user-agent"]
+          : undefined,
+        address: observedClientAddress(request, options.trustedProxies)
+          ?? normalizeIpAddress(request.socket.remoteAddress)
+          ?? "unknown",
+      },
     );
     if (
       !authorizeWebSocketPrincipal(options.auth, principal, socketClass)
@@ -139,6 +177,7 @@ export const installWebSocketUpgrade = (
     if (url.pathname === "/ws/events") {
       wss.handleUpgrade(request, socket, head, (ws) => {
         markAlive(ws);
+        registerSessionSocket(ws, principal.kind === "browser-session" ? principal.sessionId : undefined);
         options.events.addEventSocket(ws);
         ws.on("message", (raw) => {
           const message = parseSocketMessage(raw.toString());
@@ -180,6 +219,7 @@ export const installWebSocketUpgrade = (
     if (outputMatch) {
       wss.handleUpgrade(request, socket, head, (ws) => {
         markAlive(ws);
+        registerSessionSocket(ws, principal.kind === "browser-session" ? principal.sessionId : undefined);
         options.sessions.watchOutput(
           outputMatch[1],
           ws,
@@ -197,6 +237,7 @@ export const installWebSocketUpgrade = (
     }
     wss.handleUpgrade(request, socket, head, (ws) => {
       markAlive(ws);
+      registerSessionSocket(ws, principal.kind === "browser-session" ? principal.sessionId : undefined);
       options.sessions.attach(
         match[1],
         ws,

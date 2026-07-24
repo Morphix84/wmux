@@ -28,7 +28,12 @@ const principal = (kind: AuthPrincipal["kind"]): AuthPrincipal => kind === "brow
 
 const routeCases: Array<[string, string, string]> = [
   ["health", "GET", "/api/health"], ["auth-info", "GET", "/api/auth-info"], ["login", "POST", "/api/login"],
-  ["auth-session", "GET", "/api/auth/session"], ["bootstrap", "GET", "/api/bootstrap"],
+  ["auth-session", "GET", "/api/auth/session"],
+  ["auth-sessions", "GET", "/api/auth/sessions"],
+  ["auth-session-revoke", "DELETE", "/api/auth/sessions/session"],
+  ["auth-credentials", "GET", "/api/auth/credentials"],
+  ["auth-credential-rotate", "POST", "/api/auth/credentials/helper/rotate"],
+  ["bootstrap", "GET", "/api/bootstrap"],
   ["agent-session-timeline", "GET", "/api/agent-sessions/session"],
   ["agent-session-follow-up", "POST", "/api/agent-sessions/session/turns"],
   ["delegation-status", "GET", "/api/delegations/run"],
@@ -103,6 +108,9 @@ test("browser, automation, helper, registration, and legacy policies are separat
   assert.equal(authorizeHttpPrincipal(auth, principal("registered-host"), policy("GET", "/api/helpers/windows/win/bootstrap")), true);
   assert.equal(authorizeHttpPrincipal(auth, principal("registered-host"), policy("GET", "/api/bootstrap")), false);
   assert.equal(authorizeHttpPrincipal(auth, principal("automation"), policy("GET", "/api/auth/session")), false);
+  assert.equal(authorizeHttpPrincipal(auth, principal("browser-session"), policy("GET", "/api/auth/sessions")), true);
+  assert.equal(authorizeHttpPrincipal(auth, principal("automation"), policy("GET", "/api/auth/sessions")), false);
+  assert.equal(authorizeHttpPrincipal(auth, principal("helper"), policy("POST", "/api/auth/credentials/helper/rotate")), false);
   assert.equal(authorizeHttpPrincipal(auth, principal("legacy-shared"), policy("GET", "/api/bootstrap")), false);
   assert.equal(authorizeHttpPrincipal({ ...auth, browserAuthMode: "shared-or-login" }, principal("legacy-shared"), policy("GET", "/api/bootstrap")), true);
 });

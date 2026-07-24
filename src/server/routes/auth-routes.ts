@@ -8,6 +8,10 @@ import {
   type ApiRoute,
   routePolicy,
 } from "./route.js";
+import {
+  ScopedCredentialRotationError,
+  type ScopedCredentialKind,
+} from "../scoped-credential-store.js";
 
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -76,7 +80,12 @@ export const authRoutes: readonly ApiRoute[] = [
         if (!deps.browserSessions) {
           throw new Error("login-only browser session store is unavailable");
         }
-        const session = deps.browserSessions.issue(SESSION_TTL_MS, nowMs);
+        const session = deps.browserSessions.issue(SESSION_TTL_MS, nowMs, {
+          address: clientAddress,
+          device: typeof request.headers["user-agent"] === "string"
+            ? request.headers["user-agent"]
+            : undefined,
+        });
         sendJson(
           200,
           { authenticated: true, expiresInMs: SESSION_TTL_MS },
@@ -117,6 +126,99 @@ export const authRoutes: readonly ApiRoute[] = [
     ),
     handler: async ({ sendJson }) => {
       sendJson(200, { authenticated: true }, { "cache-control": "no-store" });
+    },
+  },
+  {
+    id: "auth-sessions",
+    method: "GET",
+    pattern: "/api/auth/sessions",
+    policy: routePolicy(
+      "auth-sessions",
+      "GET",
+      "/api/auth/sessions",
+      "normal",
+      undefined,
+      true,
+    ),
+    handler: async ({ deps, principal, sendJson }) => {
+      if (!deps.browserSessions || principal.kind !== "browser-session") {
+        sendJson(409, { error: "browser_session_inventory_unavailable" });
+        return;
+      }
+      sendJson(200, {
+        currentSessionId: principal.sessionId,
+        sessions: deps.browserSessions.list(),
+      }, { "cache-control": "no-store" });
+    },
+  },
+  {
+    id: "auth-session-revoke",
+    method: "DELETE",
+    pattern: /^\/api\/auth\/sessions\/([^/]+)$/,
+    policy: routePolicy(
+      "auth-session-revoke",
+      "DELETE",
+      /^\/api\/auth\/sessions\/([^/]+)$/,
+      "normal",
+      undefined,
+      true,
+    ),
+    handler: async ({ deps, match, sendJson }) => {
+      const sessionId = match?.[1] ?? "";
+      if (!deps.browserSessions?.revoke(sessionId)) {
+        sendJson(404, { error: "browser_session_not_found" });
+        return;
+      }
+      sendJson(200, { revoked: true }, { "cache-control": "no-store" });
+    },
+  },
+  {
+    id: "auth-credentials",
+    method: "GET",
+    pattern: "/api/auth/credentials",
+    policy: routePolicy(
+      "auth-credentials",
+      "GET",
+      "/api/auth/credentials",
+      "normal",
+      undefined,
+      true,
+    ),
+    handler: async ({ deps, sendJson }) => {
+      sendJson(200, {
+        credentials: deps.scopedCredentials?.list() ?? [],
+      }, { "cache-control": "no-store" });
+    },
+  },
+  {
+    id: "auth-credential-rotate",
+    method: "POST",
+    pattern: /^\/api\/auth\/credentials\/(automation|helper)\/rotate$/,
+    policy: routePolicy(
+      "auth-credential-rotate",
+      "POST",
+      /^\/api\/auth\/credentials\/(automation|helper)\/rotate$/,
+      "normal",
+      undefined,
+      true,
+    ),
+    handler: async ({ deps, match, sendJson }) => {
+      if (!deps.scopedCredentials) {
+        sendJson(409, { error: "scoped_credentials_unavailable" });
+        return;
+      }
+      try {
+        const credential = deps.scopedCredentials.rotate(
+          match?.[1] as ScopedCredentialKind,
+        );
+        sendJson(200, { credential }, { "cache-control": "no-store" });
+      } catch (error) {
+        if (error instanceof ScopedCredentialRotationError) {
+          sendJson(409, { error: error.code });
+          return;
+        }
+        throw error;
+      }
     },
   },
 ];

@@ -4932,6 +4932,44 @@ button.active-tool {
   white-space: nowrap;
 }
 
+.security-session-list,
+.security-credential-list {
+  display: grid;
+  gap: 1px;
+  margin-top: 8px;
+  background: var(--line);
+  border: 1px solid var(--line);
+}
+
+.security-session-row,
+.security-credential-row {
+  display: grid;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 4px 8px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.security-session-row {
+  grid-template-columns: minmax(160px, 2fr) minmax(90px, 1fr) minmax(100px, 1fr) minmax(100px, 1fr) auto;
+}
+
+.security-credential-row {
+  grid-template-columns: minmax(100px, 1fr) minmax(130px, 1fr) minmax(130px, 1fr) auto;
+}
+
+.security-session-row > span:first-child,
+.security-credential-row > span:first-child {
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .settings-error {
   color: #d98a7e;
 }

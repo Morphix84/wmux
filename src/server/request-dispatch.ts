@@ -37,10 +37,12 @@ import {
 } from "./static-files.js";
 import type { MachineConfig } from "./types.js";
 import type { BrowserSessionStore } from "./browser-session-store.js";
+import type { ScopedCredentialStore } from "./scoped-credential-store.js";
 import {
   expiredBrowserSessionCookie,
   requestBrowserSessionCookie,
 } from "./browser-session-cookie.js";
+import { normalizeIpAddress, observedClientAddress } from "./proxy-address.js";
 
 const MAX_JSON_BODY = 1024 * 1024;
 
@@ -116,6 +118,7 @@ interface RequestDispatcherOptions {
   protocol: "http" | "https";
   auth: AuthConfig;
   browserSessions?: BrowserSessionStore;
+  scopedCredentials?: ScopedCredentialStore;
   registrationToken?: string;
   hostRegistry?: HostRegistry;
   currentMachines: () => MachineConfig[];
@@ -190,6 +193,16 @@ export const createRequestHandler = (
           url,
           Date.now(),
           options.browserSessions,
+          options.scopedCredentials,
+          {
+            device: typeof request.headers["user-agent"] === "string"
+              ? request.headers["user-agent"]
+              : undefined,
+            address: observedClientAddress(
+              request,
+              options.deps.trustedProxies,
+            ) ?? normalizeIpAddress(request.socket.remoteAddress) ?? "unknown",
+          },
         );
     const registeredWindowsEndpoint = helperMachine?.source === "registered"
       && (

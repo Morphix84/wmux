@@ -134,7 +134,7 @@ export class SessionManager {
     private readonly onPaneReferencesChanged: () => void = () => undefined,
     private readonly pasteImages: PasteImageStager = new PasteImageStaging(),
     private readonly terminalEnvironment: () => Record<string, string> = () => ({}),
-    private readonly helperToken = "",
+    private readonly helperToken: string | (() => string) = "",
     private readonly browserAuthMode: BrowserAuthMode = "shared-or-login",
     readonly agentSessions = new AgentSessionService(state),
     terminalCheckpoints?: TerminalCheckpointStore,
@@ -412,7 +412,14 @@ export class SessionManager {
     const streamPath = streamPathForMachine(machine.id);
     const sessionEnv = {
       ...this.terminalEnvironment(),
-      ...paneAuthEnvironmentForMachine(machine, this.accessToken, this.helperToken, this.browserAuthMode),
+      ...paneAuthEnvironmentForMachine(
+        machine,
+        this.accessToken,
+        typeof this.helperToken === "function"
+          ? this.helperToken()
+          : this.helperToken,
+        this.browserAuthMode,
+      ),
       WMUX_URL: resolveHelperUrl(`http://${process.env.WMUX_HOST ?? "127.0.0.1"}:${process.env.WMUX_PORT ?? "3478"}`),
       WMUX_WORKSPACE_ID: context?.workspace.id ?? "",
       WMUX_WORKSPACE_NAME: context?.workspace.name ?? "",
