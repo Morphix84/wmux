@@ -22,8 +22,8 @@ export interface WheelScrollCoalescer {
 }
 
 export interface TouchScrollGesture {
-  start: (pointerId: number, y: number) => void;
-  move: (pointerId: number, y: number, lineHeight: number) => { handled: boolean; lines: number };
+  start: (pointerId: number, x: number, y: number) => void;
+  move: (pointerId: number, x: number, y: number, lineHeight: number) => { handled: boolean; lines: number };
   end: (pointerId: number) => { handled: boolean; tap: boolean };
   cancel: () => void;
 }
@@ -178,31 +178,43 @@ export const createWheelScrollCoalescer = ({
 
 export const createTouchScrollGesture = (thresholdPx = 8): TouchScrollGesture => {
   let activePointer: number | undefined;
+  let startX = 0;
   let startY = 0;
   let lastY = 0;
   let pendingLines = 0;
-  let scrolling = false;
+  let axis: "pending" | "horizontal" | "vertical" = "pending";
 
   const cancel = () => {
     activePointer = undefined;
     pendingLines = 0;
-    scrolling = false;
+    axis = "pending";
   };
 
   return {
-    start: (pointerId, y) => {
+    start: (pointerId, x, y) => {
       activePointer = pointerId;
+      startX = x;
       startY = y;
       lastY = y;
       pendingLines = 0;
-      scrolling = false;
+      axis = "pending";
     },
-    move: (pointerId, y, lineHeight) => {
-      if (activePointer !== pointerId || !Number.isFinite(y)) return { handled: false, lines: 0 };
-      if (!scrolling && Math.abs(y - startY) < thresholdPx) {
+    move: (pointerId, x, y, lineHeight) => {
+      if (activePointer !== pointerId || !Number.isFinite(x) || !Number.isFinite(y)) {
         return { handled: false, lines: 0 };
       }
-      scrolling = true;
+      if (axis === "pending") {
+        const horizontalDistance = Math.abs(x - startX);
+        const verticalDistance = Math.abs(y - startY);
+        if (Math.max(horizontalDistance, verticalDistance) < thresholdPx) {
+          return { handled: false, lines: 0 };
+        }
+        axis = horizontalDistance > verticalDistance * 1.25 ? "horizontal" : "vertical";
+      }
+      if (axis === "horizontal") {
+        lastY = y;
+        return { handled: true, lines: 0 };
+      }
       const height = Number.isFinite(lineHeight) && lineHeight > 0 ? lineHeight : 20;
       pendingLines += (lastY - y) / height;
       lastY = y;
@@ -212,7 +224,7 @@ export const createTouchScrollGesture = (thresholdPx = 8): TouchScrollGesture =>
     },
     end: (pointerId) => {
       if (activePointer !== pointerId) return { handled: false, tap: false };
-      const tap = !scrolling;
+      const tap = axis === "pending";
       cancel();
       return { handled: true, tap };
     },

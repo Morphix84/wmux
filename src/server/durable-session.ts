@@ -1,5 +1,6 @@
 import type { MachineConfig } from "./types.js";
 import { runCommand } from "./child-process.js";
+import { sshControlArgs } from "./ssh-control.js";
 
 const shellQuote = (value: string): string => `'${value.replace(/'/g, "'\\''")}'`;
 const remotePathBootstrap = (): string => `export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/opt/local/bin:$PATH"`;
@@ -29,7 +30,7 @@ export const readDurableSessionCwd = async (
     `${shellQuote(`${CWD_OUTPUT_PREFIX}#{pane_current_path}`)} 2>/dev/null`;
   const result = machine.kind === "local"
     ? await runCommand("/bin/sh", ["-lc", query], { timeoutMs: 1500 })
-    : await runRemote(machine, query, 4000);
+    : await runRemote(machine, query, 4000, true, paneId);
   if (!result || result.status !== 0) return undefined;
   return cwdFromDurableSessionOutput(result.stdout);
 };
@@ -182,10 +183,15 @@ const runRemote = async (
   command: string,
   timeoutMs: number,
   captureOutput = true,
+  paneId?: string,
 ) => {
   if (!machine.host) return undefined;
   const target = machine.user ? `${machine.user}@${machine.host}` : machine.host;
-  const args = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=3"];
+  const args = [
+    ...(paneId ? sshControlArgs(paneId) : []),
+    "-o", "BatchMode=yes",
+    "-o", "ConnectTimeout=3",
+  ];
   if (machine.port) args.push("-p", String(machine.port));
   args.push(target, command);
   return runCommand("ssh", args, { timeoutMs, captureOutput });

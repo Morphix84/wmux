@@ -1019,7 +1019,7 @@ export const TerminalPaneRuntime = memo(function TerminalPaneRuntime({
       if (touchHostShell) {
         touchPointerDownListener = (event) => {
           if (event.pointerType !== "touch" || !event.isPrimary) return;
-          touchScroll.start(event.pointerId, event.clientY);
+          touchScroll.start(event.pointerId, event.clientX, event.clientY);
           try {
             touchHostShell.setPointerCapture(event.pointerId);
           } catch {
@@ -1029,7 +1029,7 @@ export const TerminalPaneRuntime = memo(function TerminalPaneRuntime({
         touchPointerMoveListener = (event) => {
           if (event.pointerType !== "touch" || !event.isPrimary) return;
           const lineHeight = term.renderer?.getMetrics?.().height ?? 20;
-          const gesture = touchScroll.move(event.pointerId, event.clientY, lineHeight);
+          const gesture = touchScroll.move(event.pointerId, event.clientX, event.clientY, lineHeight);
           if (!gesture.handled) return;
           event.preventDefault();
           if (gesture.lines === 0) return;

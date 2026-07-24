@@ -124,19 +124,19 @@ export function OpenTuiMobileChrome(props: OpenTuiMobileChromeProps) {
       <div className="open-tui-mobile-chrome-actions">
         <button
           type="button"
-          aria-label="Open agent fleet"
-          onClick={props.onOpenFleet}
-        >
-          Fleet
-        </button>
-        <button
-          type="button"
           aria-label={props.navigationOpen ? "Hide workspaces and hosts" : "Open workspaces and hosts"}
           aria-expanded={props.navigationOpen}
           aria-controls="wmux-sidebar"
           onClick={props.onToggleNavigation}
         >
           Workspaces
+        </button>
+        <button
+          type="button"
+          aria-label="Open agent fleet"
+          onClick={props.onOpenFleet}
+        >
+          Fleet
         </button>
         <button
           type="button"

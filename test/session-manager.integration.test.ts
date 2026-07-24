@@ -697,6 +697,7 @@ test(
         });
         return result.status === 0 && result.stdout.trim() === movedCwd;
       });
+      await waitForCondition(() => state.findPane(pane.id)?.cwd === movedCwd, 5_000);
 
       firstManager.disposeAll();
       state.updatePane(pane.id, { cwd: undefined });

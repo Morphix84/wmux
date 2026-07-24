@@ -115,16 +115,21 @@ test("mobile sidebar opens and activates workspaces by touch", async ({ page, re
   const rootPath = `/workspaces/${root.id}/tabs/${root.activeTabId}`;
   const childPath = `/workspaces/${child.id}/tabs/${child.activeTabId}`;
   const navigation = page.getByRole("complementary", { name: "Workspace navigation" });
-  const navigationToggle = page.getByRole("banner", { name: "Mobile session controls" })
-    .getByRole("button", { name: /workspaces and hosts/i });
+  const mobileActions = page.getByRole("banner", { name: "Mobile session controls" })
+    .locator(".open-tui-mobile-chrome-actions button");
+  const navigationToggle = mobileActions.first();
   const rootItem = page.locator(`a[role="treeitem"][href="${rootPath}"]`);
   const childItem = page.locator(`a[role="treeitem"][href="${childPath}"]`);
 
   try {
     await page.goto(rootPath);
     await expect(page.locator("main.app-shell")).toBeVisible({ timeout: 20_000 });
+    await expect(mobileActions).toHaveCount(5);
+    await expect(mobileActions.nth(0)).toHaveAccessibleName("Open workspaces and hosts");
+    await expect(mobileActions.nth(1)).toHaveAccessibleName("Open agent fleet");
     await navigationToggle.tap();
     await expect(navigation).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "Agent fleet" })).toHaveCount(0);
     await expect(childItem).toHaveAttribute("draggable", "false");
 
     await childItem.tap();
@@ -136,6 +141,33 @@ test("mobile sidebar opens and activates workspaces by touch", async ({ page, re
     await rootItem.tap();
     await expect(page).toHaveURL(new RegExp(`${rootPath}$`));
     await expect(navigation).toBeHidden();
+
+    const edgeSwipe = await page.locator(".terminal-pane.active .terminal-host-shell").evaluate((element) => {
+      const shell = element as HTMLElement;
+      const rect = shell.getBoundingClientRect();
+      const dispatch = (type: string, clientX: number, clientY: number) => {
+        const event = new PointerEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          composed: true,
+          pointerId: 91,
+          pointerType: "touch",
+          isPrimary: true,
+          clientX,
+          clientY,
+        });
+        shell.dispatchEvent(event);
+        return event.defaultPrevented;
+      };
+      const startX = rect.left + 2;
+      const startY = rect.top + Math.min(120, rect.height / 2);
+      dispatch("pointerdown", startX, startY);
+      const movePrevented = dispatch("pointermove", startX + 64, startY + 8);
+      const endPrevented = dispatch("pointerup", startX + 64, startY + 8);
+      return { movePrevented, endPrevented };
+    });
+    expect(edgeSwipe).toEqual({ movePrevented: true, endPrevented: true });
+    await expect(navigation).toBeVisible();
   } finally {
     await request.delete(`/api/workspaces/${child.id}`).catch(() => undefined);
     await request.delete(`/api/workspaces/${root.id}`).catch(() => undefined);

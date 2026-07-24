@@ -1,4 +1,15 @@
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { Bell, ChevronDown, ChevronRight, CirclePlus, GripVertical, LoaderCircle, MoreHorizontal, PanelLeft, PanelLeftClose, PanelLeftOpen, Plus, Server, TerminalSquare, X } from "lucide-react";
 import { api, modalSettingsUpdate, UnauthorizedError, WorkspaceReorderConflictError } from "./api";
 import { DiagnosticsModal } from "./DiagnosticsModal";
@@ -41,6 +52,7 @@ import { maxSidebarWidth, useSidebar } from "./useSidebar";
 import { writeBrowserClipboard } from "./clipboard";
 import { summarizeWorkspaceVersion } from "./workspace-version";
 import { useMobileViewportState } from "./mobile-viewport";
+import { createMobileNavigationGesture } from "./mobile/navigation-gesture";
 import { loadMachineTargetId, persistMachineTargetId, resolveMachineTargetId } from "./machine-target";
 import { workspacePresentationDescriptor, workspacePresentationMachineId } from "./workspace-presentation";
 import { WorkspaceMoveDialog } from "./WorkspaceMoveDialog";
@@ -133,6 +145,7 @@ export function AppShell() {
     sidebarWidth,
     toggleSidebar,
     collapseSidebar,
+    expandSidebar,
     startSidebarResize,
     onSidebarResizerKeyDown,
   } = useSidebar(mobileViewport.isMobile);
@@ -179,15 +192,57 @@ export function AppShell() {
   const terminalFocusToken = useRef(0);
   const mobileSidebarRef = useRef<HTMLElement | null>(null);
   const mobileSidebarCloseRef = useRef<HTMLButtonElement | null>(null);
+  const mobileNavigationGesture = useRef(createMobileNavigationGesture());
   const finishBoot = useCallback(() => setBootComplete(true), []);
   const dismissMobileClose = useCallback(() => setPendingMobileClose(null), []);
+  const openMobileNavigation = useCallback(() => {
+    if (!sidebarCollapsed) return;
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    mobileViewport.dispatchInteraction("drawer-opened");
+    expandSidebar();
+  }, [expandSidebar, mobileViewport.dispatchInteraction, sidebarCollapsed]);
   const toggleMobileNavigation = useCallback(() => {
-    if (sidebarCollapsed) {
-      if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-      mobileViewport.dispatchInteraction("drawer-opened");
+    if (sidebarCollapsed) openMobileNavigation();
+    else collapseSidebar();
+  }, [collapseSidebar, openMobileNavigation, sidebarCollapsed]);
+  const onMobileNavigationPointerDownCapture = useCallback((event: ReactPointerEvent<HTMLElement>) => {
+    if (
+      !mobileViewport.isMobile ||
+      !sidebarCollapsed ||
+      event.pointerType !== "touch" ||
+      !event.isPrimary
+    ) {
+      mobileNavigationGesture.current.cancel();
+      return;
     }
-    toggleSidebar();
-  }, [mobileViewport.dispatchInteraction, sidebarCollapsed, toggleSidebar]);
+    mobileNavigationGesture.current.start(
+      event.pointerId,
+      event.clientX,
+      event.clientY,
+      window.visualViewport?.offsetLeft ?? 0,
+    );
+  }, [mobileViewport.isMobile, sidebarCollapsed]);
+  const onMobileNavigationPointerMoveCapture = useCallback((event: ReactPointerEvent<HTMLElement>) => {
+    if (event.pointerType !== "touch" || !event.isPrimary) return;
+    const result = mobileNavigationGesture.current.move(
+      event.pointerId,
+      event.clientX,
+      event.clientY,
+    );
+    if (!result.handled) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (result.open) openMobileNavigation();
+  }, [openMobileNavigation]);
+  const onMobileNavigationPointerUpCapture = useCallback((event: ReactPointerEvent<HTMLElement>) => {
+    if (event.pointerType !== "touch" || !event.isPrimary) return;
+    if (!mobileNavigationGesture.current.end(event.pointerId)) return;
+    event.preventDefault();
+    event.stopPropagation();
+  }, []);
+  const onMobileNavigationPointerCancelCapture = useCallback((event: ReactPointerEvent<HTMLElement>) => {
+    mobileNavigationGesture.current.cancel(event.pointerId);
+  }, []);
 
   const rebaseIncomingState = useCallback((payload: BootstrapPayload): BootstrapPayload =>
     rebaseCollapsedWorkspaceIds(
@@ -1420,7 +1475,15 @@ export function AppShell() {
 
   return (
     <ColorSchemeProvider id={settings.colorScheme}>
-    <main className={appClassName} style={appStyle} aria-busy={pendingActions.length > 0}>
+    <main
+      className={appClassName}
+      style={appStyle}
+      aria-busy={pendingActions.length > 0}
+      onPointerDownCapture={onMobileNavigationPointerDownCapture}
+      onPointerMoveCapture={onMobileNavigationPointerMoveCapture}
+      onPointerUpCapture={onMobileNavigationPointerUpCapture}
+      onPointerCancelCapture={onMobileNavigationPointerCancelCapture}
+    >
       <Toasts toasts={toasts} dismissToast={dismissToast} />
       {pendingActions.length > 0 ? (
         <div className="mutation-status" role="status" aria-live="polite">
