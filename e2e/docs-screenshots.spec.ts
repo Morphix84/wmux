@@ -15,7 +15,7 @@ interface ScreenshotBootstrap {
 }
 
 const terminalDemo = [
-  "printf '\\033[2J\\033[H",
+  "printf '\\033]7;file://docs/workspace/wmux\\a\\033[2J\\033[H",
   "\\033[1;36mwmux\\033[0m  browser terminal multiplexer\\n\\n",
   "  \\033[32m●\\033[0m local session attached\\n",
   "  \\033[32m●\\033[0m durable workspace state\\n",

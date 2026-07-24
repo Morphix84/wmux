@@ -599,7 +599,7 @@ const drawSidebarGrid = (
         ].filter(Boolean);
         const statusContextLine = statusContext.join(" · ");
         const cwd = workspace.cwd?.trim() ?? "";
-        const itemRows = 2;
+        const itemRows = 3;
         if (row + itemRows >= workspaceEndRow) break groupLoop;
         const itemStart = row;
         const statusColor = workspace.agentStatus
@@ -685,13 +685,11 @@ const drawSidebarGrid = (
         } else if (!statusContextLine) {
           write(row, detailCol, "shell", rgba.muted);
         }
-        if (!workspace.descriptor && cwd) {
-          const prefixLength = statusContextLine ? statusContextLine.length + 3 : 6;
-          const pathCol = detailCol + prefixLength;
-          if (pathCol < cols - 4) {
-            write(row, detailCol + prefixLength - 3, " · ", rgba.faint);
-            writeCompactPath(row, pathCol, cwd);
-          }
+        row++;
+        if (cwd) {
+          writeCompactPath(row, detailCol, cwd);
+        } else {
+          write(row, detailCol, "cwd unavailable", rgba.faint);
         }
         row++;
         actionRows(
