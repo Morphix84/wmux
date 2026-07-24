@@ -104,10 +104,11 @@ const applyCollectionDelta = <T>(
 };
 
 export const eventDeltaRequiresResync = (
-  current: Pick<BootstrapPayload, "eventRevision"> | null | undefined,
+  current: Pick<BootstrapPayload, "eventRevision" | "healthEpoch"> | null | undefined,
   delta: EventStateDelta,
 ): boolean => Boolean(
   !current
+  || delta.healthEpoch > current.healthEpoch
   || (
     delta.eventRevision > current.eventRevision
     && delta.baseEventRevision !== current.eventRevision

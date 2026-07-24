@@ -174,7 +174,7 @@ test("event deltas update one domain while preserving unrelated store identity",
 });
 
 test("event revision gaps require snapshot resync and stale deltas stay ignored", () => {
-  const current = { eventRevision: 7 } as BootstrapPayload;
+  const current = { eventRevision: 7, healthEpoch: 3 } as BootstrapPayload;
   const gap = {
     type: "delta",
     baseEventRevision: 8,
@@ -193,6 +193,12 @@ test("event revision gaps require snapshot resync and stale deltas stay ignored"
     baseEventRevision: 5,
     eventRevision: 6,
   }), false);
+  assert.equal(eventDeltaRequiresResync(current, {
+    ...gap,
+    baseEventRevision: 7,
+    eventRevision: 8,
+    healthEpoch: 4,
+  }), true);
   assert.equal(
     bootstrapSatisfiesEventDelta(gap, { eventRevision: 8, healthEpoch: 3 }),
     false,
