@@ -68,7 +68,7 @@ test("pane disposal prefers the live session's pre-heartbeat machine snapshot", 
   assert.equal(resolveDisposalMachine(undefined, [movedMachine], oldMachine.id)?.host, "100.70.0.9");
 });
 
-test("idle durable-client recycle keeps the old endpoint snapshot through later address churn", () => {
+test("idle durable-client recycle detaches only the transient client and keeps the old endpoint snapshot", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wmux-session-recycle-"));
   let machine: MachineConfig = {
     id: "recycled-roamer",
@@ -85,25 +85,37 @@ test("idle durable-client recycle keeps the old endpoint snapshot through later 
   const manager = new SessionManager(state, () => [machine]);
   const internals = manager as unknown as {
     sessions: Map<string, { pane: typeof pane; isExited: boolean; kill: () => void }>;
+    backends: Map<string, { detach: (session: unknown) => void }>;
     sessionMachines: Map<string, MachineConfig>;
     shouldUseDurableClientRefresh: (pane: typeof pane) => boolean;
     hasPaneConnections: (paneId: string) => boolean;
     recycleIdleDurableClient: (pane: typeof pane) => boolean;
   };
   let killed = false;
-  internals.sessions.set(pane.id, { pane, isExited: false, kill: () => { killed = true; } });
+  let detached = false;
+  const session = { pane, isExited: false, kill: () => { killed = true; } };
+  internals.sessions.set(pane.id, session);
+  internals.backends.set(pane.id, {
+    detach: (candidate) => {
+      assert.equal(candidate, session);
+      detached = true;
+    },
+  });
   internals.sessionMachines.set(pane.id, structuredClone(machine));
   internals.shouldUseDurableClientRefresh = () => true;
   internals.hasPaneConnections = () => false;
   try {
     assert.equal(internals.recycleIdleDurableClient(pane), true);
-    assert.equal(killed, true);
+    assert.equal(detached, true);
+    assert.equal(killed, false);
     assert.equal(internals.sessionMachines.get(pane.id)?.host, "100.70.0.8");
 
     killed = false;
+    detached = false;
     internals.sessions.set(pane.id, { pane, isExited: false, kill: () => { killed = true; } });
     internals.hasPaneConnections = () => true;
     assert.equal(internals.recycleIdleDurableClient(pane), false);
+    assert.equal(detached, false);
     assert.equal(killed, false);
 
     machine = { ...machine, host: "100.70.0.9" };
@@ -778,6 +790,21 @@ test(
           first,
           (message) => message.type === "output" && message.data.includes("marker-set"),
         );
+
+        fake(first).close();
+        const reattached = socket();
+        firstManager.attach(pane.id, reattached, 84, 25);
+        await waitForMessage(reattached, (message) => message.type === "ready");
+        fake(reattached).message({
+          type: "input",
+          data: "printf 'same-manager:%s\\n' \"$WMUX_RESTORE_MARKER\"\r",
+        });
+        await waitForMessage(
+          reattached,
+          (message) => message.type === "output" && message.data.includes("same-manager:survived"),
+          5_000,
+        );
+
         firstManager.disposeAll();
         assert.equal(spawnSync("tmux", ["has-session", "-t", sessionName]).status, 0);
 
