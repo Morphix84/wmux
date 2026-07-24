@@ -208,5 +208,25 @@ const replacePane = (node: LayoutNode, paneId: string, replacement: LayoutNode):
   };
 };
 
+let fallbackIdSequence = 0;
+
+export const createClientIdEntropy = (
+  browserCrypto: Pick<Crypto, "getRandomValues"> | undefined = globalThis.crypto,
+): string => {
+  if (browserCrypto?.getRandomValues) {
+    const bytes = browserCrypto.getRandomValues(new Uint8Array(16));
+    return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
+  }
+
+  fallbackIdSequence = (fallbackIdSequence + 1) & 0xffffff;
+  const timestamp = Date.now().toString(16).padStart(12, "0").slice(-12);
+  const sequence = fallbackIdSequence.toString(16).padStart(6, "0");
+  const entropy = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER)
+    .toString(16)
+    .padStart(14, "0")
+    .slice(-14);
+  return `${timestamp}${sequence}${entropy}`;
+};
+
 const clientId = (prefix: "ws" | "tab" | "pane"): string =>
-  `${prefix}_${crypto.randomUUID().replaceAll("-", "")}`;
+  `${prefix}_${createClientIdEntropy()}`;
