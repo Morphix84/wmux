@@ -81,6 +81,7 @@ server merely because its gateway URL points there.
   additive and does not move them automatically.
 - Restarting the new wmux service detaches from durable panes and reattaches on
   demand. Raw PTY panes are not restart-durable.
+  Their last VT screen checkpoint is restored as an attach shield, but the raw process and scrollback transcript do not survive.
 
 ## SSH and helper cutover
 

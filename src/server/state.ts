@@ -135,6 +135,10 @@ export class StateStore extends EventEmitter {
     return structuredClone(this.state);
   }
 
+  storageDirectory(): string {
+    return path.dirname(this.filePath);
+  }
+
   commitMutation<T>(
     mutate: (state: PersistedState) => {
       result: T;

@@ -9,6 +9,8 @@ export interface BackendSession {
   readonly replayOutput: string;
   readonly attachReady?: Promise<void>;
   readonly attachReplay?: AttachReplay;
+  readonly restoredAttachReplay?: AttachReplay;
+  readonly screenCheckpoint?: AttachReplay;
   write(data: string): void;
   writeTerminalResponse?(data: string): void;
   resize(cols: number, rows: number): void;
@@ -32,6 +34,7 @@ export interface BackendCapabilities {
   readonly cwd: "osc7" | "multiplexer" | "agent";
   readonly agentOwned: boolean;
   readonly refreshClient: boolean;
+  readonly persistentCheckpoint: boolean;
 }
 
 export interface BackendSpawnSpec {
@@ -39,6 +42,7 @@ export interface BackendSpawnSpec {
   cols: number;
   rows: number;
   env: Record<string, string>;
+  restoredCheckpoint?: AttachReplay;
 }
 
 export interface StageFileMetadata {

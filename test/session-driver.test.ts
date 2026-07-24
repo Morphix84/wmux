@@ -40,6 +40,7 @@ test("powershell SSH agent sessions use the agent-owned driver", () => {
     cwd: "agent",
     agentOwned: true,
     refreshClient: false,
+    persistentCheckpoint: true,
   });
 });
 

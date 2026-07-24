@@ -839,14 +839,19 @@ test("Windows agent hydrates a 24-row replay before attaching it to a taller spl
   const server = http.createServer((request, response) => {
     const path = request.url ?? "";
     response.writeHead(200, { "content-type": "application/json" });
-    if (request.method === "POST" && path === "/sessions/pane_replay_geometry") {
+    if (
+      request.method === "POST"
+      && path.startsWith("/sessions/pane_replay_")
+      && !path.endsWith("/resize")
+      && !path.endsWith("/input")
+    ) {
+      const legacy = path.includes("pane_replay_legacy");
       response.end(JSON.stringify({
-        id: "pane_replay_geometry",
+        id: legacy ? "pane_replay_legacy" : "pane_replay_geometry",
         pid: 123,
         base: 0,
         cursor: historyBytes,
-        cols: 80,
-        rows: 24,
+        ...(legacy ? {} : { cols: 80, rows: 24 }),
       }));
       return;
     }
@@ -861,12 +866,12 @@ test("Windows agent hydrates a 24-row replay before attaching it to a taller spl
     }
     if (request.method === "GET" && path.includes("/output")) {
       const cursor = Number(new URL(path, "http://agent").searchParams.get("cursor") ?? 0);
+      const legacy = path.includes("pane_replay_legacy");
       response.end(JSON.stringify(cursor === 0 ? {
         base: 0,
         startCursor: 0,
         cursor: historyBytes,
-        cols: 80,
-        rows: 24,
+        ...(legacy ? {} : { cols: 80, rows: 24 }),
         resizes: [],
         dataBase64: Buffer.from(historical).toString("base64"),
         exited: false,
@@ -874,8 +879,7 @@ test("Windows agent hydrates a 24-row replay before attaching it to a taller spl
         base: 0,
         startCursor: historyBytes,
         cursor: historyBytes,
-        cols: 80,
-        rows: 33,
+        ...(legacy ? {} : { cols: 80, rows: 33 }),
         resizes: [],
         dataBase64: "",
         exited: false,
@@ -888,6 +892,8 @@ test("Windows agent hydrates a 24-row replay before attaching it to a taller spl
   await once(server, "listening");
   const address = server.address();
   assert.ok(address && typeof address === "object");
+  const persisted = new TerminalCheckpoint(80, 33);
+  persisted.write("PERSISTED_FALLBACK");
   const session = new WindowsAgentSession(
     {
       id: "pane_replay_geometry",
@@ -906,22 +912,77 @@ test("Windows agent hydrates a 24-row replay before attaching it to a taller spl
     },
     80,
     33,
+    {},
+    undefined,
+    undefined,
+    {
+      data: persisted.snapshot(),
+      kind: "checkpoint",
+    },
   );
   session.resize(80, 33);
   await session.attachReady;
 
   const attach = session.attachReplay;
   const restored = new TerminalCheckpoint(80, 33);
+  const legacyPersisted = new TerminalCheckpoint(80, 33);
+  legacyPersisted.write("LEGACY_PERSISTED_SCREEN");
+  const legacySession = new WindowsAgentSession(
+    {
+      id: "pane_replay_legacy",
+      machineId: "windows",
+      title: "PowerShell",
+      status: "idle",
+      createdAt: new Date(0).toISOString(),
+    },
+    {
+      id: "windows",
+      name: "Windows",
+      kind: "powershell-ssh",
+      host: "127.0.0.1",
+      sessionBackend: "agent",
+      agentUrl: `http://127.0.0.1:${address.port}`,
+    },
+    80,
+    33,
+    {},
+    undefined,
+    undefined,
+    {
+      data: legacyPersisted.snapshot(),
+      kind: "checkpoint",
+    },
+  );
   try {
     restored.write(attach.data);
     assert.equal(attach.kind, "checkpoint");
     assert.deepEqual(restored.cursor(), { x: 4, y: 23, visible: true });
     assert.match(restored.screenLines()[23], /^PS> /);
+    assert.equal(
+      restored.screenLines().some((line) =>
+        line.includes("PERSISTED_FALLBACK")),
+      false,
+    );
     assert.equal(restored.screenLines()[32].trim(), "");
     assert.deepEqual(resizes, [{ cols: 80, rows: 33 }]);
+    await legacySession.attachReady;
+    const legacyAttach = new TerminalCheckpoint(80, 33);
+    try {
+      legacyAttach.write(legacySession.attachReplay.data);
+      assert.equal(
+        legacyAttach.screenLines().some((line) =>
+          line.includes("LEGACY_PERSISTED_SCREEN")),
+        true,
+      );
+    } finally {
+      legacyAttach.dispose();
+    }
   } finally {
+    persisted.dispose();
+    legacyPersisted.dispose();
     restored.dispose();
     session.detach();
+    legacySession.detach();
     server.close();
     await once(server, "close");
   }

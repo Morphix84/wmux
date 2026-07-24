@@ -533,10 +533,14 @@ posixTest("wmux-agent-run tui forwards termination to the complete child process
   try {
     const request = { runId: "tui-signal", runtime: "codex", directory: dir };
     child.stdin.write(`${Buffer.from(JSON.stringify(request)).toString("base64")}\nWMUX_AGENT_TUI_ACK tui-signal\n`);
-    await waitFor(() => fs.existsSync(pidPath), "supervised child did not start");
+    let runtimePid = 0;
+    await waitFor(() => {
+      if (!fs.existsSync(pidPath)) return false;
+      runtimePid = Number(fs.readFileSync(pidPath, "utf8"));
+      return Number.isSafeInteger(runtimePid) && runtimePid > 0;
+    }, "supervised child did not publish its pid");
     child.kill("SIGTERM");
     await waitFor(() => stdout.includes("WMUX_AGENT_TUI_EXIT tui-signal 143"), "forwarded termination did not emit exit marker");
-    const runtimePid = Number(fs.readFileSync(pidPath, "utf8"));
     assert.throws(() => process.kill(runtimePid, 0), /ESRCH/);
     child.stdin.end("WMUX_AGENT_TUI_RELEASE tui-signal\n");
     assert.equal(await closed, 143);

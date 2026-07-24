@@ -29,6 +29,8 @@ export class PtySession extends EventEmitter<PtyEvents> {
   private title: string;
   private cwd = "";
   private cwdCaptureBuffer = "";
+  private liveResetEmitted = false;
+  private restoredReplayConsumed = false;
 
   constructor(
     readonly pane: PaneState,
@@ -36,6 +38,7 @@ export class PtySession extends EventEmitter<PtyEvents> {
     cols: number,
     rows: number,
     extraEnv: Record<string, string> = {},
+    private readonly restoredCheckpoint?: AttachReplay,
   ) {
     super();
     const spec = buildSpawnSpec(machine, cols, rows, extraEnv);
@@ -54,7 +57,13 @@ export class PtySession extends EventEmitter<PtyEvents> {
       this.checkpoint.write(data);
       this.appendReplay(data);
       this.captureCwd(data);
-      this.emit("output", data);
+      this.emit(
+        "output",
+        this.restoredCheckpoint && !this.liveResetEmitted
+          ? `\x1bc${data}`
+          : data,
+      );
+      this.liveResetEmitted = true;
       if (!trackProcessTitle) return;
       const processTitle = this.pty.process?.trim();
       if (processTitle && processTitle !== this.title) {
@@ -82,7 +91,30 @@ export class PtySession extends EventEmitter<PtyEvents> {
   }
 
   get attachReplay(): AttachReplay {
-    return selectAttachReplay(this.replayOutput, this.replayTruncated, this.checkpoint);
+    const current = selectAttachReplay(
+      this.replayOutput,
+      this.replayTruncated,
+      this.checkpoint,
+    );
+    if (!this.restoredCheckpoint || this.restoredReplayConsumed) return current;
+    if (!this.liveResetEmitted) return this.restoredCheckpoint;
+    this.restoredReplayConsumed = true;
+    return {
+      data: this.restoredCheckpoint.data
+        + (current.data ? `\x1bc${current.data}` : ""),
+      kind: "checkpoint",
+    };
+  }
+
+  get restoredAttachReplay(): AttachReplay | undefined {
+    return this.restoredReplayConsumed
+      ? undefined
+      : this.restoredCheckpoint;
+  }
+
+  get screenCheckpoint(): AttachReplay | undefined {
+    const data = this.checkpoint.snapshot();
+    return data ? { data, kind: "checkpoint" } : undefined;
   }
 
   write(data: string): void {
