@@ -4,7 +4,11 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { requestBrowserSessionCookie } from "./browser-session-cookie.js";
-import type { BrowserSessionStore } from "./browser-session-store.js";
+import type {
+  BrowserSessionObservation,
+  BrowserSessionStore,
+} from "./browser-session-store.js";
+import type { ScopedCredentialStore } from "./scoped-credential-store.js";
 
 const wmuxHome = (): string => path.join(os.homedir(), ".wmux");
 const defaultTokenPath = (): string => path.join(wmuxHome(), "token");
@@ -396,13 +400,19 @@ export const authenticateRequest = (
   url: URL,
   nowMs: number = Date.now(),
   browserSessions?: BrowserSessionStore,
+  scopedCredentials?: ScopedCredentialStore,
+  browserObservation: BrowserSessionObservation = {},
 ): AuthPrincipal => {
   if (!auth.enabled) return { kind: "anonymous" };
   const browserAuthMode = auth.browserAuthMode ?? "shared-or-login";
   const bearer = requestBearerToken(request);
   if (bearer) {
-    if (auth.automationToken && tokensMatch(auth.automationToken, bearer)) return { kind: "automation" };
-    if (auth.helperToken && tokensMatch(auth.helperToken, bearer)) return { kind: "helper" };
+    const scopedPrincipal = scopedCredentials?.authenticate(bearer, nowMs);
+    if (scopedPrincipal) return { kind: scopedPrincipal };
+    if (!scopedCredentials) {
+      if (auth.automationToken && tokensMatch(auth.automationToken, bearer)) return { kind: "automation" };
+      if (auth.helperToken && tokensMatch(auth.helperToken, bearer)) return { kind: "helper" };
+    }
     if (browserAuthMode === "login-only") return { kind: "anonymous" };
     if (tokensMatch(auth.token, bearer)) return { kind: "legacy-shared" };
     const expiresAt = auth.sessionSecret ? verifySessionToken(auth.sessionSecret, bearer, nowMs) : null;
@@ -413,6 +423,7 @@ export const authenticateRequest = (
     const session = browserSessions?.authenticate(
       requestBrowserSessionCookie(request),
       nowMs,
+      browserObservation,
     );
     return session
       ? {

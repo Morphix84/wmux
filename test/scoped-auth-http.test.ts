@@ -36,8 +36,12 @@ test("login-only enforces scoped REST and WebSocket transports end to end", asyn
     sessionSecret: "session-test-secret",
     browserAuthMode: "login-only",
     automationToken: "A".repeat(43),
+    automationTokenPath: path.join(directory, "automation-token"),
     helperToken: "H".repeat(43),
+    helperTokenPath: path.join(directory, "helper-token"),
   };
+  fs.writeFileSync(auth.automationTokenPath, `${auth.automationToken}\n`, { mode: 0o600 });
+  fs.writeFileSync(auth.helperTokenPath, `${auth.helperToken}\n`, { mode: 0o600 });
   const machines: MachineConfig[] = [
     { id: "local", name: "Local", kind: "local" },
     { id: "win", name: "Windows", kind: "powershell-ssh", host: "127.0.0.1" },
@@ -63,7 +67,10 @@ test("login-only enforces scoped REST and WebSocket transports end to end", asyn
   try {
     const login = await fetch(`${base}/api/login`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        "user-agent": "Device One",
+      },
       body: JSON.stringify({
         username: "operator",
         password: "correct horse",
@@ -84,7 +91,21 @@ test("login-only enforces scoped REST and WebSocket transports end to end", asyn
     const browser = {
       cookie,
       "content-type": "application/json",
+      "user-agent": "Device One",
     };
+    const secondLogin = await fetch(`${base}/api/login`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "user-agent": "Device Two",
+      },
+      body: JSON.stringify({
+        username: "operator",
+        password: "correct horse",
+      }),
+    });
+    assert.equal(secondLogin.status, 200);
+    const secondCookie = secondLogin.headers.get("set-cookie")!.split(";", 1)[0];
     assert.equal((await fetch(`${base}/api/bootstrap`, { headers: bearer(auth.automationToken!) })).status, 200);
     assert.equal((await fetch(`${base}/api/bootstrap?token=${encodeURIComponent(auth.automationToken!)}`)).status, 401);
     assert.equal((await fetch(`${base}/api/bootstrap`, { headers: bearer(auth.helperToken!) })).status, 403);
@@ -104,6 +125,49 @@ test("login-only enforces scoped REST and WebSocket transports end to end", asyn
     assert.equal((await fetch(`${base}/api/auth/session`, { headers: bearer(auth.automationToken!) })).status, 403);
     assert.equal((await fetch(`${base}/api/future-route`, { headers: browser })).status, 401);
     assert.equal((await fetch(`${base}/api/workspaces`, { headers: bearer(auth.automationToken!) })).status, 401);
+
+    const sessionInventory = await fetch(`${base}/api/auth/sessions`, { headers: browser });
+    assert.equal(sessionInventory.status, 200);
+    const inventory = await sessionInventory.json() as {
+      currentSessionId: string;
+      sessions: Array<{ id: string; device: string; address: string }>;
+    };
+    assert.equal(inventory.sessions.length, 2);
+    assert.ok(inventory.sessions.every((session) => session.address === "127.0.0.1"));
+    const secondSession = inventory.sessions.find((session) => session.device === "Device Two");
+    assert.ok(secondSession);
+    const secondSocket = await connect(`${wsBase}/ws/events`, {
+      cookie: secondCookie,
+      "user-agent": "Device Two",
+    });
+    sockets.push(secondSocket);
+    const revokedSocketClosed = once(secondSocket, "close");
+    assert.equal((await fetch(
+      `${base}/api/auth/sessions/${encodeURIComponent(secondSession.id)}`,
+      { method: "DELETE", headers: browser },
+    )).status, 200);
+    await revokedSocketClosed;
+    assert.equal((await fetch(`${base}/api/auth/session`, {
+      headers: { cookie: secondCookie, "user-agent": "Device Two" },
+    })).status, 401);
+
+    const oldHelperToken = auth.helperToken!;
+    const rotateHelper = await fetch(
+      `${base}/api/auth/credentials/helper/rotate`,
+      { method: "POST", headers: browser },
+    );
+    assert.equal(rotateHelper.status, 200);
+    assert.notEqual(auth.helperToken, oldHelperToken);
+    assert.equal((await fetch(`${base}/api/notifications`, {
+      method: "POST",
+      headers: bearer(oldHelperToken),
+      body: "{}",
+    })).status, 401);
+    assert.equal((await fetch(`${base}/api/notifications`, {
+      method: "POST",
+      headers: bearer(auth.helperToken!),
+      body: "{}",
+    })).status, 201);
 
     const browserBundle = await fetch(`${base}/api/helpers/windows/win`, { headers: browser });
     assert.equal(browserBundle.status, 403);

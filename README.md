@@ -373,7 +373,9 @@ Within the private Host/Origin/bind boundary, only `/api/health`, auth metadata,
   `scripts/wmux-set-password --username you`.
   Login sessions last 30 days.
   In `shared-or-login` mode they remain signed compatibility tokens protected by `~/.wmux/session-secret`.
-  In `login-only` mode the browser receives an opaque HttpOnly SameSite cookie and wmux persists only its keyed digest in owner-only `~/.wmux/browser-sessions.json`.
+  In `login-only` mode the browser receives an opaque HttpOnly SameSite cookie and wmux persists its keyed digest plus bounded device, address, issue, expiry, and last-seen metadata in owner-only `~/.wmux/browser-sessions.json`.
+  Settings lists these sessions and can revoke any device.
+  Revocation immediately terminates every browser WebSocket owned by that session and rejects its next HTTP request.
   Set `WMUX_BROWSER_SESSION_PATH` to override that record path.
   Restart a running service with `systemctl --user restart wmux.service` after changing credentials; the helper prints this reminder after updating the credential file.
 - `WMUX_DISABLE_AUTH=1` disables token checks only for deliberately isolated
@@ -384,6 +386,12 @@ Within the private Host/Origin/bind boundary, only `/api/health`, auth metadata,
 - Provision scoped credentials without displaying them with `node scripts/wmux-provision-scoped-auth.mjs`.
   Provide `WMUX_AUTOMATION_TOKEN` / `WMUX_AUTOMATION_TOKEN_PATH` and `WMUX_HELPER_TOKEN` / `WMUX_HELPER_TOKEN_PATH` (file form preferred).
   Use owner-only token files at the configured paths and never put credentials in arguments, logs, documentation, or URLs.
+  Scoped credentials expire after 30 days by default.
+  Set `WMUX_SCOPED_CREDENTIAL_TTL_MS` to an integer from one hour through 365 days to choose a different lifetime for newly discovered or rotated credentials.
+  Settings shows issue and expiry times and can atomically rotate file-backed credentials without returning their values to the browser.
+  An old value loses authority immediately and fails with `401`.
+  Environment-backed credentials must be rotated through their external owner.
+  Copies provisioned to remote hosts must still be distributed explicitly after rotation.
 - Automation and helper credentials are distinct typed principals.
   Automation is limited to reviewed controller actions and pane-output WebSocket access; helper is limited to reviewed event, title, notification, media, clipboard, stream, and profile operations.
   Both use authorization headers only; scoped credentials are forbidden in query parameters and never fall back or retry across scopes.
@@ -391,14 +399,12 @@ Within the private Host/Origin/bind boundary, only `/api/health`, auth metadata,
 - The browser must pass the password-session gate before bootstrap or browser WebSockets.
   In `login-only` mode the browser session is never returned to JavaScript, local storage, or a URL.
   REST and WebSocket requests authenticate through the HttpOnly SameSite cookie, with `Secure` added for direct TLS or an HTTPS `WMUX_PUBLIC_URL`.
-  Session inventory/revocation and finer per-client capabilities remain deferred.
+  Session and scoped-credential controls change lifetime and revocation only; the existing exact-route authorities remain unchanged.
+  Finer per-client capabilities remain deferred.
   wmux is not a public-Internet deployment.
 - Use HTTPS away from loopback and treat every token as a password.
 - Keep helper, clipboard, media, agent, and streaming endpoints behind the same
   private boundary. The Windows agent and Moonlight gateway use separate tokens.
-
-Browser session tokens currently live in `localStorage` and WebSocket auth uses a query parameter.
-wmux is not a hardened multi-user service.
 
 ### Repository working-tree snapshots
 

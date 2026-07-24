@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Trash2, X } from "lucide-react";
-import { api } from "./api";
+import {
+  api,
+  type BrowserSessionMetadata,
+  type ScopedCredentialMetadata,
+} from "./api";
 import { OpenTuiSettingsModal } from "./OpenTuiSettingsModal";
 import { terminalColorSchemes } from "./color-schemes";
 import { compileKeybindings, eventMatchesAction } from "../../shared/keybindings";
@@ -52,11 +56,45 @@ export function SettingsModal({
   const [sessionAudit, setSessionAudit] = useState<DurableSessionAudit | null>(null);
   const [sessionAuditError, setSessionAuditError] = useState("");
   const [sessionAuditLoading, setSessionAuditLoading] = useState(false);
+  const [browserSessions, setBrowserSessions] = useState<BrowserSessionMetadata[]>([]);
+  const [currentSessionId, setCurrentSessionId] = useState<string>();
+  const [scopedCredentials, setScopedCredentials] = useState<ScopedCredentialMetadata[]>([]);
+  const [securityLoading, setSecurityLoading] = useState(false);
+  const [securityError, setSecurityError] = useState("");
+  const [securityAvailable, setSecurityAvailable] = useState(false);
   const compiledKeybindings = useMemo(() => compileKeybindings(keybindings), [keybindings]);
 
   useEffect(() => {
     setDraft(normalizeSettings(settings, defaults.terminalFontSize));
   }, [defaults, settings]);
+
+  const loadSecurity = useCallback(async () => {
+    setSecurityLoading(true);
+    setSecurityError("");
+    try {
+      const authInfo = await api.authInfo();
+      if (authInfo.browserAuthMode !== "login-only") {
+        setSecurityAvailable(false);
+        return;
+      }
+      const [sessionResponse, credentialResponse] = await Promise.all([
+        api.browserSessions(),
+        api.scopedCredentials(),
+      ]);
+      setBrowserSessions(sessionResponse.sessions);
+      setCurrentSessionId(sessionResponse.currentSessionId);
+      setScopedCredentials(credentialResponse.credentials);
+      setSecurityAvailable(true);
+    } catch (error) {
+      setSecurityError(error instanceof Error ? error.message : "Security inventory failed");
+    } finally {
+      setSecurityLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadSecurity();
+  }, [loadSecurity]);
 
   const applyDraft = (nextSettings: WmuxSettings) => {
     const normalized = normalizeSettings(nextSettings, defaults.terminalFontSize);
@@ -130,6 +168,39 @@ export function SettingsModal({
     }
   };
 
+  const revokeBrowserSession = async (session: BrowserSessionMetadata) => {
+    const suffix = session.id === currentSessionId
+      ? " This will sign out this browser."
+      : "";
+    if (!window.confirm(`Revoke ${session.device} at ${session.address}?${suffix}`)) return;
+    setSecurityLoading(true);
+    setSecurityError("");
+    try {
+      await api.revokeBrowserSession(session.id);
+      if (session.id === currentSessionId) {
+        window.location.reload();
+        return;
+      }
+      await loadSecurity();
+    } catch (error) {
+      setSecurityError(error instanceof Error ? error.message : "Session revocation failed");
+      setSecurityLoading(false);
+    }
+  };
+
+  const rotateScopedCredential = async (credential: ScopedCredentialMetadata) => {
+    if (!window.confirm(`Rotate the ${credential.kind} credential now? Existing copies will stop working immediately.`)) return;
+    setSecurityLoading(true);
+    setSecurityError("");
+    try {
+      await api.rotateScopedCredential(credential.kind);
+      await loadSecurity();
+    } catch (error) {
+      setSecurityError(error instanceof Error ? error.message : "Credential rotation failed");
+      setSecurityLoading(false);
+    }
+  };
+
   const openTuiSurface = surface === "opentui";
 
   if (openTuiSurface) {
@@ -141,6 +212,12 @@ export function SettingsModal({
         sessionAudit={sessionAudit}
         sessionAuditError={sessionAuditError}
         sessionAuditLoading={sessionAuditLoading}
+        browserSessions={browserSessions}
+        currentSessionId={currentSessionId}
+        scopedCredentials={scopedCredentials}
+        securityAvailable={securityAvailable}
+        securityLoading={securityLoading}
+        securityError={securityError}
         saving={saving}
         keybindings={keybindings}
         appleKeybindings={appleKeybindings}
@@ -151,6 +228,8 @@ export function SettingsModal({
         onUseDomFallback={onUseDomFallback}
         onRunSessionAudit={runSessionAudit}
         onCleanupSession={cleanupSession}
+        onRevokeBrowserSession={revokeBrowserSession}
+        onRotateScopedCredential={rotateScopedCredential}
       />
     );
   }
@@ -328,6 +407,67 @@ export function SettingsModal({
             </label>
           </section>
           <section className="settings-section">
+            <h3>Sessions and credentials</h3>
+            {!securityAvailable && !securityLoading && !securityError ? (
+              <div className="settings-command-row">
+                <span>Available with login-only browser authentication</span>
+              </div>
+            ) : null}
+            {securityLoading && !securityAvailable ? (
+              <div className="settings-command-row"><span>Loading security inventory</span></div>
+            ) : null}
+            {securityError ? <div className="settings-error">{securityError}</div> : null}
+            {securityAvailable ? (
+              <>
+                <div className="security-session-list">
+                  {browserSessions.map((session) => (
+                    <div className="security-session-row" key={session.id}>
+                      <span title={session.device}>
+                        {session.device}
+                        {session.id === currentSessionId ? " [THIS DEVICE]" : ""}
+                      </span>
+                      <span>{session.address}</span>
+                      <span title={new Date(session.issuedAt).toLocaleString()}>
+                        ISSUED {formatRelativeTime(session.issuedAt)}
+                      </span>
+                      <span title={new Date(session.lastSeenAt).toLocaleString()}>
+                        SEEN {formatRelativeTime(session.lastSeenAt)}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={securityLoading}
+                        onClick={() => void revokeBrowserSession(session)}
+                      >
+                        REVOKE
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <div className="security-credential-list">
+                  {scopedCredentials.map((credential) => (
+                    <div className="security-credential-row" key={credential.kind}>
+                      <span>{credential.kind.toUpperCase()}</span>
+                      <span title={new Date(credential.issuedAt).toLocaleString()}>
+                        ISSUED {formatRelativeTime(credential.issuedAt)}
+                      </span>
+                      <span title={new Date(credential.expiresAt).toLocaleString()}>
+                        EXPIRES {formatRelativeTime(credential.expiresAt)}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={securityLoading || !credential.rotatable}
+                        title={credential.rotatable ? `Rotate ${credential.kind} credential` : "Environment-backed credentials must be rotated outside wmux"}
+                        onClick={() => void rotateScopedCredential(credential)}
+                      >
+                        ROTATE
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : null}
+          </section>
+          <section className="settings-section">
             <h3>Durable sessions</h3>
             <div className="settings-command-row">
               <button type="button" onClick={runSessionAudit} disabled={sessionAuditLoading}>
@@ -403,6 +543,17 @@ export function SettingsModal({
     </div>
   );
 }
+
+const formatRelativeTime = (timestamp: number): string => {
+  const deltaSeconds = Math.round((timestamp - Date.now()) / 1_000);
+  const formatter = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
+  if (Math.abs(deltaSeconds) < 60) return formatter.format(deltaSeconds, "second");
+  const deltaMinutes = Math.round(deltaSeconds / 60);
+  if (Math.abs(deltaMinutes) < 60) return formatter.format(deltaMinutes, "minute");
+  const deltaHours = Math.round(deltaMinutes / 60);
+  if (Math.abs(deltaHours) < 24) return formatter.format(deltaHours, "hour");
+  return formatter.format(Math.round(deltaHours / 24), "day");
+};
 
 const normalizeSettings = (
   settings: WmuxSettings,
