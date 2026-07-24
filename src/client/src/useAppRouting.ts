@@ -23,7 +23,6 @@ export interface ActivateWorkspaceTabOptions {
 
 interface UseAppRoutingOptions {
   store: AppStore;
-  openTuiMode: boolean;
   activeWorkspace: Workspace | undefined;
   activeTab: SurfaceTab | undefined;
   onError: (message: string) => void;
@@ -40,18 +39,13 @@ interface UseAppRoutingOptions {
 // compatibility fallback ids, but navigation never writes them back, so two
 // browsers can view the same wmux state independently.
 export function useAppRouting(options: UseAppRoutingOptions) {
-  const { store, openTuiMode, activeWorkspace, activeTab } = options;
+  const { store, activeWorkspace, activeTab } = options;
   const lastSyncedPath = useRef("");
   const activePaneSelections = useRef(loadActivePaneSelections());
   const activeTabSelections = useRef(loadActiveTabSelections());
   // Latest callbacks/flags for the []-dep popstate effect and stable callbacks.
   const optionsRef = useRef(options);
   optionsRef.current = options;
-
-  const chromePath = useCallback(
-    (path: string) => (openTuiMode ? path : `${path}?legacy=1`),
-    [openTuiMode],
-  );
 
   const refresh = useCallback(
     async (nextState?: BootstrapPayload) => {
@@ -83,7 +77,7 @@ export function useAppRouting(options: UseAppRoutingOptions) {
         (notification) => notification.workspaceId === workspaceId && !notification.read,
       );
 
-      const nextPath = chromePath(workspaceTabPath(workspaceId, target.tab.id));
+      const nextPath = workspaceTabPath(workspaceId, target.tab.id);
       if (currentChromePath() !== nextPath) {
         window.history[activateOptions.replaceHistory ? "replaceState" : "pushState"](null, "", nextPath);
         lastSyncedPath.current = nextPath;
@@ -104,7 +98,7 @@ export function useAppRouting(options: UseAppRoutingOptions) {
           .catch((nextError) => onError(String(nextError)));
       }
     },
-    [chromePath, refresh, store],
+    [refresh, store],
   );
 
   const activatePane = useCallback(
@@ -134,7 +128,7 @@ export function useAppRouting(options: UseAppRoutingOptions) {
   useEffect(() => {
     if (!store.get()) return;
     if (!activeWorkspace || !activeTab) {
-      const nextPath = chromePath("/");
+      const nextPath = "/";
       if (currentChromePath() !== nextPath) {
         window.history.replaceState(null, "", nextPath);
         lastSyncedPath.current = nextPath;
@@ -147,7 +141,7 @@ export function useAppRouting(options: UseAppRoutingOptions) {
       activePaneSelections.current = { ...activePaneSelections.current, [activeTab.id]: activeTab.activePaneId };
       saveActivePaneSelections(activePaneSelections.current);
     }
-    const nextChromePath = chromePath(workspaceTabPath(activeWorkspace.id, activeTab.id));
+    const nextChromePath = workspaceTabPath(activeWorkspace.id, activeTab.id);
     const currentPath = currentChromePath();
     if (currentPath === nextChromePath) {
       lastSyncedPath.current = nextChromePath;
@@ -157,7 +151,7 @@ export function useAppRouting(options: UseAppRoutingOptions) {
     window.history[replace ? "replaceState" : "pushState"](null, "", nextChromePath);
     lastSyncedPath.current = nextChromePath;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- store is read, not depended on
-  }, [activeWorkspace, activeTab, chromePath]);
+  }, [activeWorkspace, activeTab]);
 
   useEffect(() => {
     const onPopState = () => {
@@ -168,7 +162,7 @@ export function useAppRouting(options: UseAppRoutingOptions) {
     return () => window.removeEventListener("popstate", onPopState);
   }, [activateWorkspaceTab]);
 
-  return { refresh, activateWorkspaceTab, activatePane, chromePath };
+  return { refresh, activateWorkspaceTab, activatePane };
 }
 
 const currentChromePath = () => `${window.location.pathname}${window.location.search}`;

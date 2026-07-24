@@ -383,7 +383,8 @@ export function OpenTuiSidebar({
               aria-level={workspace.depth + 1}
               aria-current={workspace.active ? "page" : undefined}
               aria-expanded={workspace.hasChildren ? workspace.expanded : undefined}
-              aria-label={`${workspace.title}${workspace.hiddenUnreadCount ? `, ${workspace.hiddenUnreadCount} hidden unread` : ""}${workspace.hiddenAgentStatus ? `, hidden descendant agent status ${workspace.hiddenAgentStatus}` : ""}`}
+              aria-label={`${workspace.title}${workspace.agentCreated ? `, created by ${workspace.agentName ?? "an agent"}` : ""}${workspace.hiddenUnreadCount ? `, ${workspace.hiddenUnreadCount} hidden unread` : ""}${workspace.hiddenAgentStatus ? `, hidden descendant agent status ${workspace.hiddenAgentStatus}` : ""}`}
+              data-agent-created={workspace.agentCreated ? "true" : undefined}
               onClick={(event) => {
                 if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
                 event.preventDefault();

@@ -319,6 +319,7 @@ export const TerminalPaneRuntime = memo(function TerminalPaneRuntime({
     let terminalOutputTimer: number | undefined;
     let predictionExpiryTimer: number | undefined;
     let predictionProbeTimer: number | undefined;
+    let predictionProbeVerificationFrame: number | undefined;
     let predictionRenderer: TerminalPredictionRenderer | undefined;
     let predictionAcknowledgedSequence: number | undefined;
     let clearPredictionsAfterRender = false;
@@ -405,10 +406,15 @@ export const TerminalPaneRuntime = memo(function TerminalPaneRuntime({
       predictionProbeAcknowledgedSequence = undefined;
       if (predictionProbeTimer !== undefined) window.clearTimeout(predictionProbeTimer);
       predictionProbeTimer = undefined;
+      if (predictionProbeVerificationFrame !== undefined) {
+        window.cancelAnimationFrame(predictionProbeVerificationFrame);
+      }
+      predictionProbeVerificationFrame = undefined;
     };
 
     const disarmPrediction = () => {
       predictionArmedScreen = undefined;
+      if (predictionCanvasRef.current) delete predictionCanvasRef.current.dataset.armedScreen;
       clearPredictionProbe();
       clearPredictions();
     };
@@ -459,7 +465,15 @@ export const TerminalPaneRuntime = memo(function TerminalPaneRuntime({
       predictionProbeAcknowledgedSequence = Math.max(predictionProbeAcknowledgedSequence ?? 0, sequence);
     };
 
-    const verifyPredictionProbe = (term: Terminal) => {
+    const schedulePredictionProbeVerification = (term: Terminal) => {
+      if (predictionProbeVerificationFrame !== undefined) return;
+      predictionProbeVerificationFrame = window.requestAnimationFrame(() => {
+        predictionProbeVerificationFrame = undefined;
+        verifyPredictionProbe(term);
+      });
+    };
+
+    function verifyPredictionProbe(term: Terminal): void {
       const probe = predictionProbe;
       const cursor = term.wasmTerm?.getCursor();
       if (!probe || !cursor || predictionProbeAcknowledgedSequence === undefined) return;
@@ -472,10 +486,14 @@ export const TerminalPaneRuntime = memo(function TerminalPaneRuntime({
         safeRows(term.rows),
         screen,
         (col, row) => terminalCodepoint(term, col, row),
-      )) return;
+      )) {
+        schedulePredictionProbeVerification(term);
+        return;
+      }
       predictionArmedScreen = screen;
+      if (predictionCanvasRef.current) predictionCanvasRef.current.dataset.armedScreen = screen;
       clearPredictionProbe();
-    };
+    }
 
     const schedulePredictionExpiry = () => {
       if (predictionExpiryTimer !== undefined) window.clearTimeout(predictionExpiryTimer);

@@ -41,7 +41,7 @@ The desktop view and both mobile surfaces show the same live Codex workspace.
 
 | Component | Responsibility |
 | --- | --- |
-| Browser client | React chrome, `ghostty-web` terminals, mobile controls, media, text/image clipboard handling, and stream views |
+| Browser client | Canvas 2D cell-grid chrome with semantic DOM controls where required, `ghostty-web` terminals, mobile controls, media, text/image clipboard handling, and stream views |
 | HTTP transport | Declarative route table with stable route ids, exact method/path matching, body limits, authorization policy, request dispatch, static delivery, event publication, and WebSocket upgrades |
 | Node.js service | Private-network boundary, bearer authentication, bounded REST uploads, event WebSocket, and canonical workspace state |
 | Agent sessions | `AgentSessionService` owns persisted delegation transitions and side effects; the versioned timeline store retains prompts, outcomes, touched files, and archived working-tree snapshots; Codex, Claude, and OpenCode adapters own runtime-specific TUI and optional headless behavior |

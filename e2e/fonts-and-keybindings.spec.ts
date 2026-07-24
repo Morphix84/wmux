@@ -189,23 +189,46 @@ test("predicts bounded shell and alternate-screen input locally", async ({
   request,
 }, testInfo) => {
   test.skip(testInfo.project.name !== "chromium", "desktop terminal prediction coverage");
-  test.setTimeout(45_000);
+  test.setTimeout(60_000);
 
+  const simulatedOutputDelay = 250;
+  const waitForAuthoritativeOutput = () => waitForSimulatedTerminalRoundTrip(page, simulatedOutputDelay + 300);
+  const settleDeliveredOutput = () => page.evaluate(() =>
+    new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  let holdAuthoritativeOutput = false;
+  const heldAuthoritativeOutput: Array<() => void> = [];
+  const releaseAuthoritativeOutput = () => {
+    holdAuthoritativeOutput = false;
+    for (const send of heldAuthoritativeOutput.splice(0)) send();
+  };
+  let deliveredTerminalOutput = "";
   let sawAlternateScreen = false;
   await page.routeWebSocket(/\/ws\/panes\//, (browserSocket) => {
     const serverSocket = browserSocket.connectToServer();
     browserSocket.onMessage((message) => serverSocket.send(message));
     serverSocket.onMessage((message) => {
       let delay = 0;
+      let output = "";
       try {
         const parsed = JSON.parse(String(message)) as { type?: string; data?: string };
-        if (parsed.type === "output") delay = 250;
+        if (parsed.type === "output") {
+          delay = simulatedOutputDelay;
+          output = parsed.data ?? "";
+        }
         if (parsed.data?.includes("\x1b[?1049h")) sawAlternateScreen = true;
       } catch {
         // Forward non-JSON frames without delay.
       }
+      const deliver = () => {
+        browserSocket.send(message);
+        deliveredTerminalOutput += output;
+      };
+      if (delay > 0 && holdAuthoritativeOutput) {
+        heldAuthoritativeOutput.push(deliver);
+        return;
+      }
       // The delayed external terminal frame is required to make prediction visible before authoritative echo.
-      setTimeout(() => browserSocket.send(message), delay);
+      setTimeout(deliver, delay);
     });
   });
 
@@ -219,13 +242,15 @@ test("predicts bounded shell and alternate-screen input locally", async ({
     const activePane = page.locator(".terminal-pane.active");
     await expect(activePane).toHaveClass(/terminal-ready/, { timeout: 10_000 });
     const textarea = activePane.locator(".terminal-host textarea");
-    await textarea.evaluate((element: HTMLTextAreaElement) => element.focus());
-    await waitForSimulatedTerminalRoundTrip(page, 400);
-    await page.keyboard.type("a");
-    await waitForSimulatedTerminalRoundTrip(page);
-
-    await page.keyboard.type("x");
     const predictionCanvas = activePane.locator(".terminal-input-prediction-canvas");
+    await textarea.evaluate((element: HTMLTextAreaElement) => element.focus());
+    await expect.poll(() => deliveredTerminalOutput, { timeout: 10_000 }).toMatch(/(?:^|\r?\n)[$#] $/);
+    await settleDeliveredOutput();
+    await page.keyboard.type("a");
+    await expect(predictionCanvas).toHaveAttribute("data-armed-screen", "normal", { timeout: 10_000 });
+
+    holdAuthoritativeOutput = true;
+    await page.keyboard.type("x");
     await expect(predictionCanvas).toHaveAttribute("data-active", "true");
     const predictedX = JSON.parse(
       (await predictionCanvas.getAttribute("data-prediction-cells")) ?? "[]",
@@ -233,29 +258,43 @@ test("predicts bounded shell and alternate-screen input locally", async ({
     await page.keyboard.press("Backspace");
     await expect.poll(() => predictionCanvas.getAttribute("data-prediction-cursor"))
       .toBe(JSON.stringify({ col: predictedX.col, row: predictedX.row }));
-    await expect(predictionCanvas).not.toHaveAttribute("data-active", "true", { timeout: 1_000 });
+    releaseAuthoritativeOutput();
+    await expect(predictionCanvas).not.toHaveAttribute("data-active", "true", { timeout: 3_000 });
 
     await page.keyboard.press("Backspace");
-    await waitForSimulatedTerminalRoundTrip(page);
+    await waitForAuthoritativeOutput();
+    const bashOutputOffset = deliveredTerminalOutput.length;
     await page.keyboard.type("PS1=$'\\e[30;46mP>' bash --noprofile --norc -i");
     await page.keyboard.press("Enter");
-    await waitForSimulatedTerminalRoundTrip(page, 600);
+    await expect.poll(
+      () => deliveredTerminalOutput.slice(bashOutputOffset),
+      { timeout: 10_000 },
+    ).toContain("\x1b[30;46mP>");
+    await settleDeliveredOutput();
     await page.keyboard.type("a");
-    await waitForSimulatedTerminalRoundTrip(page);
+    await expect(predictionCanvas).toHaveAttribute("data-armed-screen", "normal", { timeout: 10_000 });
+    holdAuthoritativeOutput = true;
     await page.keyboard.type("x");
     await expect(predictionCanvas).toHaveAttribute("data-active", "true");
     await page.keyboard.press("Control+C");
-    await waitForSimulatedTerminalRoundTrip(page);
+    releaseAuthoritativeOutput();
+    await waitForAuthoritativeOutput();
     await page.keyboard.type("exit");
     await page.keyboard.press("Enter");
-    await waitForSimulatedTerminalRoundTrip(page, 500);
+    await waitForAuthoritativeOutput();
+    const alternateOutputOffset = deliveredTerminalOutput.length;
     await page.keyboard.type("printf '\\033[?1049h\\033[2J\\033[HREADY\\r\\n'");
     await page.keyboard.press("Enter");
-    await waitForSimulatedTerminalRoundTrip(page, 600);
+    await expect.poll(
+      () => deliveredTerminalOutput.slice(alternateOutputOffset),
+      { timeout: 10_000 },
+    ).toContain("READY");
+    await settleDeliveredOutput();
     expect(sawAlternateScreen).toBe(true);
     await page.keyboard.type("a");
-    await waitForSimulatedTerminalRoundTrip(page);
+    await expect(predictionCanvas).toHaveAttribute("data-armed-screen", "alternate", { timeout: 10_000 });
 
+    holdAuthoritativeOutput = true;
     await page.keyboard.type("z");
     await expect(predictionCanvas).toHaveAttribute("data-active", "true");
     const predictedZ = JSON.parse(
@@ -264,12 +303,13 @@ test("predicts bounded shell and alternate-screen input locally", async ({
     await page.keyboard.press("Backspace");
     await expect.poll(() => predictionCanvas.getAttribute("data-prediction-cursor"))
       .toBe(JSON.stringify({ col: predictedZ.col, row: predictedZ.row }));
-    await waitForSimulatedTerminalRoundTrip(page);
+    releaseAuthoritativeOutput();
+    await waitForAuthoritativeOutput();
     await page.keyboard.press("Control+C");
-    await waitForSimulatedTerminalRoundTrip(page, 300);
+    await waitForAuthoritativeOutput();
     await page.keyboard.type("printf '\\033[?1049l'");
     await page.keyboard.press("Enter");
-    await waitForSimulatedTerminalRoundTrip(page);
+    await waitForAuthoritativeOutput();
 
     await page.keyboard.press("Control+K");
     const palette = page.getByRole("dialog", { name: "Command palette" });
@@ -284,6 +324,7 @@ test("predicts bounded shell and alternate-screen input locally", async ({
     await expect(diagnostics.locator(".latency-row", { hasText: /SHELL::CANVAS/i }).locator("span").nth(1)).not.toHaveText("0");
     await expect(diagnostics.locator(".latency-row", { hasText: /TUI::PREDICTED/i }).locator("span").nth(1)).not.toHaveText("0");
   } finally {
+    releaseAuthoritativeOutput();
     const removed = await request.delete(`/api/workspaces/${payload.workspace.id}`);
     expect(removed.ok()).toBeTruthy();
   }
@@ -350,11 +391,20 @@ test("persists a color scheme and applies it to the shared chrome palette", asyn
   const originalSettings = (await before.json() as { settings: Record<string, unknown> }).settings;
 
   try {
-    await page.goto("/?legacy=1");
+    await page.goto("/");
     await expect(page.locator("main.app-shell")).toBeVisible({ timeout: 20_000 });
-    await page.locator('button[title="Settings"]').click();
+    await page.keyboard.press("Control+K");
+    const palette = page.getByRole("dialog", { name: "Command palette" });
+    await palette.getByRole("textbox").fill("Open settings");
+    await page.keyboard.press("Enter");
     const settings = page.getByRole("dialog", { name: "Settings" });
-    await settings.getByLabel("App color scheme").selectOption("dracula");
+    await expect(settings).toBeVisible();
+    await page.keyboard.press("ArrowUp");
+    await page.keyboard.press("ArrowUp");
+    await page.keyboard.press("ArrowUp");
+    await page.keyboard.press("ArrowUp");
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("ArrowRight");
     await expect.poll(() => page.locator("html").evaluate((element) =>
       element.style.getPropertyValue("--black"),
     )).toBe("#282a36");

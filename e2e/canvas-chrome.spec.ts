@@ -8,22 +8,35 @@ const waitForLifeFrameWindow = async (
   await page.waitForTimeout(milliseconds);
 };
 
-test("legacy workspace tree preserves nested indentation and agent origin", async ({ page, request }, testInfo) => {
-  test.skip(testInfo.project.name !== "chromium", "legacy desktop tree coverage");
+test("legacy query parameters canonicalize to the canvas chrome", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "canvas desktop routing coverage");
+  test.setTimeout(60_000);
+  await page.goto("/?legacy=1");
+  await expect(page.locator("main.app-shell")).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator(".open-tui-sidebar canvas")).toBeVisible();
+  await expect.poll(() => new URL(page.url()).searchParams.has("legacy")).toBe(false);
+});
+
+test("canvas workspace tree exposes nested depth and agent origin", async ({ page, request }, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "canvas desktop tree coverage");
+  test.setTimeout(60_000);
   const { child, root } = await createNestedWorkspacePair(request);
   try {
-    await page.goto(`/workspaces/${root.id}/tabs/${root.activeTabId}?legacy=1`);
+    await page.goto(`/workspaces/${root.id}/tabs/${root.activeTabId}`);
     await expect(page.locator("main.app-shell")).toBeVisible({ timeout: 20_000 });
-    const rootItem = page.locator(`a.workspace-item[href^="/workspaces/${root.id}/"]`);
-    const childItem = page.locator(`a.workspace-item[href^="/workspaces/${child.id}/"]`);
+    const rootItem = page.locator(`a[role="treeitem"][href^="/workspaces/${root.id}/"]`);
+    const childItem = page.locator(`a[role="treeitem"][href^="/workspaces/${child.id}/"]`);
     await expect(rootItem).toHaveAttribute("aria-level", "1");
     await expect(childItem).toHaveAttribute("aria-level", "2");
-    await expect(rootItem.locator("xpath=..")).toHaveCSS("margin-left", "0px");
-    await expect(childItem.locator("xpath=..")).toHaveCSS("margin-left", "14px");
-    await expect(childItem.getByTitle("Created by an agent")).toHaveText("AI");
-    await page.getByRole("button", { name: `Collapse ${root.name}` }).click();
+    await expect(childItem).toHaveAttribute("data-agent-created", "true");
+    await expect(childItem).toHaveAttribute("aria-label", /created by an agent/);
+    const collapseButton = page.getByRole("button", { name: `Collapse ${root.name}` });
+    await collapseButton.focus();
+    await page.keyboard.press("Enter");
     await expect(childItem).toHaveCount(0);
-    await page.getByRole("button", { name: `Expand ${root.name}` }).click();
+    const expandButton = page.getByRole("button", { name: `Expand ${root.name}` });
+    await expandButton.focus();
+    await page.keyboard.press("Enter");
     await expect(childItem).toBeVisible();
   } finally {
     await request.delete(`/api/workspaces/${child.id}`);
