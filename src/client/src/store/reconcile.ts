@@ -131,6 +131,12 @@ export const applyEventDelta = (
 ): BootstrapPayload | null | undefined => {
   if (!current || delta.eventRevision <= current.eventRevision) return current;
   if (delta.baseEventRevision !== current.eventRevision) return current;
+  if (delta.revision < current.revision) {
+    return {
+      ...current,
+      eventRevision: delta.eventRevision,
+    };
+  }
   const workspaceDelta = delta.workspaces;
   const agentDelta = delta.agents;
   return reconcile(current, {

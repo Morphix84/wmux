@@ -209,6 +209,31 @@ test("event revision gaps require snapshot resync and stale deltas stay ignored"
   );
 });
 
+test("older state deltas advance event ordering without regressing a newer HTTP snapshot", () => {
+  const current = {
+    eventRevision: 4,
+    revision: 9,
+    healthEpoch: 3,
+    workspaces: [{ id: "workspace", name: "Newest" }],
+  } as unknown as BootstrapPayload;
+  const updated = applyEventDelta(current, {
+    type: "delta",
+    baseEventRevision: 4,
+    eventRevision: 5,
+    revision: 8,
+    healthEpoch: 3,
+    workspaces: {
+      items: {
+        upserted: [{ ...current.workspaces[0], name: "Older" }],
+        removedIds: [],
+      },
+    },
+  });
+  assert.equal(updated?.eventRevision, 5);
+  assert.equal(updated?.revision, 9);
+  assert.equal(updated?.workspaces[0].name, "Newest");
+});
+
 test("revision-aware reconciliation keeps newer state and accepts current snapshots", () => {
   const current = { revision: 12, healthEpoch: 4, value: "socket" };
   assert.equal(reconcileIncomingRevision(current, { revision: 11, healthEpoch: 99, value: "http" }), current);
