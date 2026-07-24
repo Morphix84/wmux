@@ -242,7 +242,7 @@ if ((Test-Path -LiteralPath $AgentDefaultsPath) -and -not (Test-Path -LiteralPat
   }
   $DefaultAgentConfig = Get-Content -LiteralPath $AgentDefaultsPath -Raw | ConvertFrom-Json -AsHashtable
   $ChangedAgentConfig = $false
-  foreach ($Key in @('machine', 'host', 'port', 'shell', 'cwd', 'helperDir', 'maxReplayBytes', 'backend', 'heartbeatOwner', 'heartbeatEnabled', 'heartbeatIntervalSeconds')) {
+  foreach ($Key in @('machine', 'host', 'port', 'shell', 'cwd', 'helperDir', 'maxReplayBytes', 'backend', 'heartbeatOwner', 'heartbeatEnabled', 'heartbeatIntervalSeconds', 'streamOwner', 'streamEnabled')) {
     if (-not $ExistingAgentConfig.ContainsKey($Key)) {
       $ExistingAgentConfig[$Key] = $DefaultAgentConfig[$Key]
       $ChangedAgentConfig = $true
@@ -310,6 +310,13 @@ $Task = Get-ScheduledTask -TaskName 'wmux-stream-agent' -ErrorAction SilentlyCon
 $TaskInfo = if ($Task) { Get-ScheduledTaskInfo -TaskName 'wmux-stream-agent' -ErrorAction SilentlyContinue } else { $null }
 $AgentTask = Get-ScheduledTask -TaskName 'wmux-windows-agent' -ErrorAction SilentlyContinue
 $AgentTaskInfo = if ($AgentTask) { Get-ScheduledTaskInfo -TaskName 'wmux-windows-agent' -ErrorAction SilentlyContinue } else { $null }
+$AgentHealth = $null
+try {
+  $AgentConfig = Get-Content -LiteralPath (Join-Path $HOME '.wmux\\windows-agent.json') -Raw | ConvertFrom-Json
+  $AgentHost = if ($AgentConfig.host -and $AgentConfig.host -notin @('0.0.0.0', '::')) { [string]$AgentConfig.host } else { '127.0.0.1' }
+  $AgentPort = if ($AgentConfig.port) { [int]$AgentConfig.port } else { 3481 }
+  $AgentHealth = Invoke-RestMethod -Method Get -Uri "http://\${AgentHost}:\${AgentPort}/health" -TimeoutSec 3
+} catch {}
 $LegacyHeartbeatTask = Get-ScheduledTask -TaskName 'wmux-heartbeat' -ErrorAction SilentlyContinue
 $RegistrationStateDir = Join-Path $HOME '.wmux'
 $SunshineCommand = Get-Command sunshine.exe -ErrorAction SilentlyContinue
@@ -371,7 +378,14 @@ try {
   sunshinePath = $(if ($SunshineCommand) { [string]$SunshineCommand.Source } else { $null })
   sunshineApiReachable = $SunshineReachable
   streamConfigExists = [bool]$StreamConfig
-  streamTaskState = $(if ($Task) { [string]$Task.State } else { 'missing' })
+  streamTaskState = $(
+    if ($AgentHealth.stream.running) { 'Running' }
+    elseif ($AgentHealth.stream.configured -and $AgentHealth.stream.enabled) { 'Restarting' }
+    elseif ($AgentHealth.stream) { 'Disabled' }
+    elseif ($Task) { "legacy:$([string]$Task.State)" }
+    else { 'missing' }
+  )
+  streamSupervisor = $(if ($AgentHealth) { $AgentHealth.stream } else { $null })
   streamTaskLastRunTime = $(if ($TaskInfo) { $TaskInfo.LastRunTime.ToString('o') } else { $null })
   streamTaskLastTaskResult = $(if ($TaskInfo) { $TaskInfo.LastTaskResult } else { $null })
   agentConfigExists = [bool](Test-Path -LiteralPath (Join-Path $HOME '.wmux\\windows-agent.json') -PathType Leaf)
@@ -475,6 +489,8 @@ const windowsAgentConfig = (machine: MachineConfig): Record<string, unknown> => 
   heartbeatOwner: true,
   heartbeatEnabled: true,
   heartbeatIntervalSeconds: 30,
+  streamOwner: true,
+  streamEnabled: true,
   // When set, the agent requires this bearer token on every request, closing
   // the unauthenticated-RCE exposure to other hosts on the tailnet.
   ...(machine.agentToken ? { token: machine.agentToken } : {}),

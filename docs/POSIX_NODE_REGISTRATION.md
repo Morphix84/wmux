@@ -1,7 +1,7 @@
 # POSIX Session Agent Setup
 
 The native POSIX session agent gives Linux and macOS machines restart-durable wmux panes without requiring `tmux` or `screen`.
-It runs independently under systemd user services or launchd, owns each pane's PTY and replay buffer, and implements the same generated HTTP contract as the Windows agent.
+It runs independently under systemd user services or launchd, owns each pane's PTY and replay buffer, supervises on-demand view-only capture, and implements the same generated HTTP contract as the Windows agent.
 
 ## Security boundary
 
@@ -20,7 +20,9 @@ The listener defaults to loopback port `3481`, the backend defaults to a native 
   "host": "127.0.0.1",
   "port": 3481,
   "token": "replace-with-a-long-random-token",
-  "backend": "pty"
+  "backend": "pty",
+  "streamOwner": true,
+  "streamEnabled": true
 }
 ```
 
@@ -41,7 +43,7 @@ scripts/install-session-agent-service.sh
 systemctl --user status wmux-session-agent.service
 ```
 
-The installer links the repository-owned agent into `~/.local/bin`, installs a restarting user service, and retires the standalone `wmux-heartbeat` timer.
+The installer links the repository-owned agent and capture worker into `~/.local/bin`, installs one restarting user service, and retires the standalone `wmux-heartbeat` and `wmux-stream-agent` services.
 Enable user lingering if the agent must remain available while the target account is logged out:
 
 ```bash
@@ -58,7 +60,15 @@ launchctl print "gui/$(id -u)/io.wmux.session-agent"
 ```
 
 The installer creates `~/Library/LaunchAgents/io.wmux.session-agent.plist` with `RunAtLoad` and `KeepAlive`.
+It also prepares `~/.wmux/WmuxStreamAgent.app` as the Screen Recording identity and retires the standalone capture LaunchAgent.
 The agent runs only while that user's graphical login domain exists.
+
+## View-only streaming
+
+Provision owner-only `~/.wmux/stream-agent.json`, install FFmpeg, and use the same session-agent installer shown above.
+The native agent starts and reconnects the capture worker, while the worker starts FFmpeg only while a browser holds a stream lease.
+On macOS, grant Screen Recording permission to `~/.wmux/WmuxStreamAgent.app`.
+See [STREAMING.md](STREAMING.md) for the shared configuration, MediaMTX setup, and platform limitations.
 
 ## Static wmux configuration
 
@@ -119,6 +129,7 @@ curl http://127.0.0.1:3481/health
 ```
 
 From the wmux server, query the exact private address and confirm the response reports the expected release and generated protocol version.
+When streaming is configured, confirm the health response contains `stream.configured: true` and that `stream.running` returns after intentionally terminating the capture worker.
 Create an agent-backed pane, run a command, restart only `wmux.service`, and confirm the pane reattaches with the process and terminal state intact.
 Closing the pane explicitly must remove the corresponding agent session.
 

@@ -319,6 +319,13 @@ function Get-WindowsWmuxReport {
   $LegacyHeartbeatTask = Get-ScheduledTask -TaskName 'wmux-heartbeat' -ErrorAction SilentlyContinue
   $AgentTask = Get-ScheduledTask -TaskName 'wmux-windows-agent' -ErrorAction SilentlyContinue
   $AgentTaskInfo = if ($AgentTask) { Get-ScheduledTaskInfo -TaskName 'wmux-windows-agent' -ErrorAction SilentlyContinue } else { $null }
+  $AgentHealth = $null
+  try {
+    $AgentConfig = Get-Content -LiteralPath $AgentConfigPath -Raw | ConvertFrom-Json
+    $AgentHost = if ($AgentConfig.host -and $AgentConfig.host -notin @('0.0.0.0', '::')) { [string]$AgentConfig.host } else { '127.0.0.1' }
+    $AgentPort = if ($AgentConfig.port) { [int]$AgentConfig.port } else { 3481 }
+    $AgentHealth = Invoke-RestMethod -Method Get -Uri "http://${AgentHost}:${AgentPort}/health" -TimeoutSec 3
+  } catch {}
   $AgentFirewall = Get-WindowsAgentFirewallReport
   $SunshineCommand = Get-SunshineCommand
   $SunshineUrl = if ($env:WMUX_SUNSHINE_URL) { $env:WMUX_SUNSHINE_URL } else { 'https://127.0.0.1:47990' }
@@ -335,7 +342,8 @@ function Get-WindowsWmuxReport {
     helpers = $Helpers
     streamConfigPath = $ConfigPath
     streamConfigExists = Test-Path -LiteralPath $ConfigPath -PathType Leaf
-    streamTaskState = if ($Task) { [string]$Task.State } else { 'missing' }
+    streamTaskState = if ($AgentHealth.stream.running) { 'Running' } elseif ($AgentHealth.stream.configured -and $AgentHealth.stream.enabled) { 'Restarting' } elseif ($AgentHealth.stream) { 'Disabled' } elseif ($Task) { "legacy:$([string]$Task.State)" } else { 'missing' }
+    streamSupervisor = if ($AgentHealth) { $AgentHealth.stream } else { $null }
     streamTaskLastRunTime = if ($TaskInfo) { $TaskInfo.LastRunTime.ToString('o') } else { $null }
     streamTaskLastTaskResult = if ($TaskInfo) { $TaskInfo.LastTaskResult } else { $null }
     heartbeatManagedByAgent = $true
@@ -479,8 +487,8 @@ install-sunshine Install Sunshine with winget when missing.
 configure-sunshine Set Sunshine credentials from WMUX_SUNSHINE_USER/WMUX_SUNSHINE_PASSWORD.
 start-sunshine Start sunshine.exe for the current logged-in user session.
 sunshine-status Print the Sunshine section of the validation report.
-install-stream Install/start the per-user wmux stream-agent Scheduled Task.
-stream-status  Show the wmux stream-agent Scheduled Task status.
+install-stream Compatibility alias for install-agent; capture is supervised by the native agent.
+stream-status  Show native-agent capture supervision status.
 install-agent  Install/start the per-user Windows session agent with integrated registration heartbeat.
 configure-agent-firewall IP... Allow the base and eight rollout ports from exact internal wmux server IPs (requires elevation).
 agent-firewall-status Show the managed Windows agent firewall rule as JSON.
@@ -520,10 +528,11 @@ switch ($Action) {
     (Get-WindowsWmuxReport).sunshine | ConvertTo-Json -Depth 8
   }
   'install-stream' {
-    Invoke-WmuxHelper 'wmux-stream-agent-service' @('install')
+    Write-Warning 'install-stream is now an alias for install-agent; the native agent owns capture supervision.'
+    Invoke-WmuxHelper 'wmux-windows-agent-service' @('install')
   }
   'stream-status' {
-    Invoke-WmuxHelper 'wmux-stream-agent-service' @('status')
+    Invoke-WmuxHelper 'wmux-windows-agent-service' @('status')
   }
   'install-agent' {
     Invoke-WmuxHelper 'wmux-windows-agent-service' @('install')

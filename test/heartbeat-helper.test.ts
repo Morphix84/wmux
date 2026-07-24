@@ -19,11 +19,14 @@ test("heartbeat service installer locks down registration files", () => {
   assert.ok(fs.existsSync("deploy/wmux-heartbeat.timer.example"));
 });
 
-test("POSIX session agent installer supervises both platforms and retires standalone heartbeat", () => {
+test("POSIX session agent installer owns heartbeat and stream supervision on both platforms", () => {
   const installer = read("scripts/install-session-agent-service.sh");
   assert.match(installer, /chmod 600 "\$\{CONFIG_PATH\}"/);
   assert.match(installer, /systemctl --user disable --now wmux-heartbeat\.timer wmux-heartbeat\.service/);
+  assert.match(installer, /systemctl --user disable --now wmux-stream-agent\.service/);
   assert.match(installer, /systemctl --user enable --now wmux-session-agent\.service/);
+  assert.match(installer, /wmux-stream-agent-service" uninstall/);
+  assert.match(installer, /wmux-stream-agent-service" prepare/);
   assert.match(installer, /launchctl bootstrap/);
   assert.ok(fs.existsSync("deploy/wmux-session-agent.service.example"));
   assert.ok(fs.existsSync("deploy/io.wmux.session-agent.plist.example"));

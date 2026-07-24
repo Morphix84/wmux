@@ -32,7 +32,7 @@ const mediaMtxUi: StreamProviderUi = {
   stateLabel: (stream) => (stream.live ? "live" : stream.requested ? "starting agent" : "requesting stream"),
   offlineTitle: (stream) => (stream.requested ? "Starting pixel stream" : "No active pixel stream"),
   offlineHint: (machineName) =>
-    `Keep wmux-stream-agent-service running on ${machineName}; capture starts only while this dialog is open.`,
+    `Keep the native wmux agent running on ${machineName}; capture starts only while this dialog is open.`,
   hint: (stream) =>
     stream.publishRtspUrl && stream.publishWhipUrl
       ? [
