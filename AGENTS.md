@@ -34,8 +34,10 @@ This is intentionally not a multi-tenant SaaS app. Bearer authentication is defe
 - `npm run build` builds the client and server.
 - `npm run check` runs tests, TypeScript checks, script validation, and the production build.
 - `npm run test:e2e` runs the isolated desktop and mobile Playwright suite.
-- `npm run test:e2e:shard:1` and `npm run test:e2e:shard:2` split the standard Playwright matrix into two deterministic shards.
+- `npm run test:e2e:server` runs specs that require the Playwright driver and fixture service to share a checkout and filesystem.
+- `npm run test:e2e:browser` runs the complementary browser-only group, which can use a fixture service on another trusted private-network host.
 - `npm run test:e2e:serve` starts an isolated standard-suite service on the explicit private IP in `WMUX_E2E_SERVER_HOST`; a browser-only runner connects by setting `WMUX_E2E_BASE_URL`.
+- Run concurrent E2E groups against separate fixture-service instances so their state mutations remain isolated.
 - `npm run docs:screenshots` regenerates the tracked desktop and mobile README screenshots from the isolated Playwright fixture.
 - `npm run start -- --host 127.0.0.1 --port 3478` runs the built service.
 - `npm run audit:sessions` audits local wmux-managed durable `tmux`/`screen` sessions.

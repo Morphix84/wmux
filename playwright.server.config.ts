@@ -1,0 +1,8 @@
+import { defineConfig } from "@playwright/test";
+import { serverCoupledE2eSpecs } from "./e2e/test-groups.js";
+import baseConfig from "./playwright.config.js";
+
+export default defineConfig({
+  ...baseConfig,
+  testMatch: serverCoupledE2eSpecs,
+});
