@@ -1,0 +1,12 @@
+#!/usr/bin/env python3
+import os
+import runpy
+import sys
+
+
+script_dir = os.path.dirname(os.path.realpath(__file__))
+sys.path.insert(0, script_dir)
+runpy.run_path(
+    os.path.join(script_dir, "wmux-windows-agent"),
+    run_name="__main__",
+)

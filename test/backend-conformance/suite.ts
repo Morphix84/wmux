@@ -92,7 +92,9 @@ export const exerciseBackendConformance = async (
   paneId: string,
 ): Promise<void> => {
   let session: BackendSession | undefined;
-  const windows = backend.id === "windows-agent";
+  const windows =
+    backend.machine.kind === "powershell"
+    || backend.machine.kind === "powershell-ssh";
   try {
     const started = await spawn(backend, paneId);
     session = started.session;

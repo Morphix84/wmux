@@ -73,11 +73,23 @@ cases = [
     ({"backend": "conpty"}, False, "conpty"),
 ]
 
+original_os_name = module.os.name
+module.os.name = "nt"
 for config, available, expected in cases:
     module.conpty_available = lambda available=available: available
     actual = module.configured_backend(config)
     if actual != expected:
         raise AssertionError((config, available, actual, expected))
+module.os.name = "posix"
+for config, expected in [
+    ({"backend": "auto"}, "pty"),
+    ({"backend": "pty"}, "pty"),
+    ({"backend": "stdio"}, "stdio"),
+]:
+    actual = module.configured_backend(config)
+    if actual != expected:
+        raise AssertionError((config, actual, expected))
+module.os.name = original_os_name
 print("ok")
 `;
   const result = spawnSync(python.command, [...python.args, "-c", script], {

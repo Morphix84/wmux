@@ -47,7 +47,7 @@ The desktop view and both mobile surfaces show the same live Codex workspace.
 | Agent sessions | `AgentSessionService` owns persisted delegation transitions and side effects; the versioned timeline store retains prompts, outcomes, touched files, and archived working-tree snapshots; Codex, Claude, and OpenCode adapters own runtime-specific TUI and optional headless behavior |
 | Session manager | One live client per pane, pinned backend snapshots, temporary image staging, bounded replay, VT checkpoints, resize ownership, and dispatch through the shared `SessionBackend` contract |
 | Machine catalog | Merges static `wmux.config.json` machines with dynamically registered heartbeat hosts |
-| Execution backends | Raw PTY, durable `tmux`/`screen`, and Windows agent adapters; the Windows agent owns pane processes, replay, and dynamic-registration heartbeat |
+| Execution backends | Raw PTY, durable `tmux`/`screen`, and native session-agent adapters; POSIX and Windows agents own pane processes, replay, and dynamic-registration heartbeat |
 | Shared contracts | TypeScript browser/server protocol plus generated Python delegation and Windows-agent constants checked by `npm run check:contracts` |
 | Persistent state | Workspace layout, delegation outcomes, settings, persistent mobile attachments, and metadata under `~/.wmux`; expiring paste-image stages are not workspace state |
 | Optional streaming | Machine-local MediaMTX capture or a Moonlight/Sunshine gateway, requested by the browser |
@@ -219,6 +219,9 @@ cp wmux.config.example.json wmux.config.json
 
 - Local and POSIX SSH machines default to `sessionBackend: "auto"`, preferring
   `tmux`, then `screen`; use `"pty"` to force a raw session.
+- Linux and macOS machines can use `sessionBackend: "agent"` for a native,
+  supervised PTY owner that survives a wmux service restart without requiring
+  `tmux` or `screen`.
 - Use `kind: "powershell-ssh"` for Windows hosts reached from Linux or macOS.
   It requires OpenSSH Server and PowerShell 7 on Windows.
 - Static `powershell-ssh` machines may set `"loadPowerShellProfile": true` to
@@ -236,7 +239,8 @@ cp wmux.config.example.json wmux.config.json
   scoped `WMUX_ALLOWED_BIND_RANGES` override for an unusual internal IP range.
 
 Never commit machine inventories, credentials, tokens, private-key paths, or
-personal service URLs. Windows setup is covered in
+personal service URLs. POSIX setup is covered in
+[docs/POSIX_NODE_REGISTRATION.md](docs/POSIX_NODE_REGISTRATION.md), and Windows setup is covered in
 [docs/WINDOWS_NODE_REGISTRATION.md](docs/WINDOWS_NODE_REGISTRATION.md).
 
 When moving the service to another computer, do not copy a server-relative
@@ -321,12 +325,14 @@ scripts/wmux-heartbeat --once
 scripts/install-heartbeat-service.sh
 ```
 
-Windows agent hosts send the same registration heartbeat from inside the
-`wmux-windows-agent` process. Provision the three files above, configure
-`~/.wmux/windows-agent.json`, and run `wmux-windows-setup install-agent`; there
-is no separate Windows heartbeat task. Installing the agent retires a legacy
-`wmux-heartbeat` task if one exists. wmux always dials the validated heartbeat
-source address and removes agent credentials from browser/status responses.
+Native session-agent hosts send the same registration heartbeat from inside
+the owning agent process. On POSIX, configure `~/.wmux/session-agent.json` and
+run `scripts/install-session-agent-service.sh`. On Windows, configure
+`~/.wmux/windows-agent.json` and run `wmux-windows-setup install-agent`.
+There is no separate heartbeat task on either agent path. Installing or
+starting the owning agent retires a legacy `wmux-heartbeat` task if one exists.
+wmux always dials the validated heartbeat source address and removes agent
+credentials from browser/status responses.
 Registered panes do not receive the broad wmux API token, so API-posting helpers
 need separately provisioned authorization.
 
@@ -738,6 +744,44 @@ restart still terminates its pane processes. See the
 [Windows registration runbook](docs/WINDOWS_NODE_REGISTRATION.md) for setup and
 validation.
 
+## POSIX Session Agent
+
+Linux and macOS can run the native `wmux-session-agent` under systemd user
+services or launchd. It owns a real PTY, bounded replay, resize history, staged
+paste files, and the optional dynamic-registration heartbeat.
+
+```bash
+mkdir -p ~/.wmux
+chmod 700 ~/.wmux
+python3 -c 'import json,secrets; print(json.dumps({"host":"127.0.0.1","port":3481,"token":secrets.token_urlsafe(32),"backend":"pty"}, indent=2))' > ~/.wmux/session-agent.json
+chmod 600 ~/.wmux/session-agent.json
+scripts/install-session-agent-service.sh
+```
+
+For a remote machine, bind the agent to its exact Tailscale or private address,
+allow the configured port only from the wmux server, and copy the generated
+token into that machine's untracked wmux configuration.
+
+```json
+{
+  "id": "linux-agent-box",
+  "kind": "ssh",
+  "platform": "linux",
+  "host": "100.64.0.21",
+  "user": "operator",
+  "sessionBackend": "agent",
+  "agentPort": 3481,
+  "agentToken": "replace-with-the-agent-token"
+}
+```
+
+The process is independent of the wmux service, so an agent-owned pane survives
+a wmux restart even if `tmux` and `screen` are unavailable.
+Explicit pane closure deletes the owned process.
+An unexpected session-agent restart still terminates its child processes.
+See the [POSIX registration runbook](docs/POSIX_NODE_REGISTRATION.md) for static
+and dynamic setup, network restrictions, and validation.
+
 An unused side-by-side generation can be retired without risking live panes:
 
 ```powershell
@@ -763,6 +807,7 @@ Set `WMUX_TERMINAL_CHECKPOINT_DIR` to override that directory.
 | Backend | Survives browser refresh | Survives wmux restart |
 | --- | --- | --- |
 | Local/SSH `auto`, `tmux`, or `screen` | Yes | Yes |
+| POSIX session agent | Yes | Yes, while the agent remains running |
 | Raw PTY | Yes | No |
 | Plain PowerShell-over-SSH | Yes | No |
 | Windows session agent | Yes | Yes, while the agent remains running |
@@ -771,7 +816,7 @@ Each live pane also has bounded in-memory raw replay for scrollback-preserving r
 The current VT screen checkpoint is persisted on a debounce and restored as the attach shield after a wmux restart for every backend that declares checkpoint persistence.
 This restores screen state only.
 Raw PTY and legacy PowerShell processes remain non-durable, scrollback transcripts remain intentionally unpersisted, and durable multiplexers still redraw from their live session after wmux reattaches.
-The current Windows agent continues to record byte-exact resize boundaries so live replay can replace the restored shield at the correct dimensions.
+Native session agents record byte-exact resize boundaries so live replay can replace the restored shield at the correct dimensions.
 
 Explicitly closing a pane, tab, or workspace kills its backing session. Audit
 local wmux-owned multiplexer sessions with:
@@ -843,9 +888,9 @@ known implementation gaps. Report vulnerabilities privately according to the
 
 - wmux is single-user and private-network only.
 - Machine management remains file-based; dynamic registrations have no UI.
-- Linux and macOS session agents are not implemented. The Windows agent is
-  experimental and does not preserve processes across its own unexpected or
-  forced restart. Automatic staged updates wait for active panes to close.
+- Native session agents do not preserve processes across their own unexpected
+  or forced restart. Windows automatic staged updates wait for active panes to
+  close.
 - Dynamic registered panes need separately provisioned auth for helpers that
   post back to wmux.
 - Kitty graphics support is partial; Sixel and iTerm2 image protocols are not

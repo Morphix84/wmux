@@ -7,6 +7,7 @@ import type { MachineConfig } from "./types.js";
 import { sshControlOnlyArgs, sshControlPath } from "./ssh-control.js";
 import {
   deleteWindowsAgentPasteImage,
+  shouldUseSessionAgent,
   stageWindowsAgentPasteImage,
   WindowsAgentPasteImageUnsupportedError,
 } from "./windows-agent.js";
@@ -89,15 +90,21 @@ export class PasteImageStaging implements PasteImageStager {
       if (machine.command?.length || machine.kind === "service" || machine.kind === "powershell") {
         throw new PasteImageStageError(422, "paste_image_target_unsupported");
       }
-      if (machine.kind === "local") {
+      if (shouldUseSessionAgent(machine)) {
+        adapter = "windows-agent";
+        targetPath = await stageWindowsAgentPasteImage(
+          machine,
+          paneId,
+          stageId,
+          validated.extension,
+          data,
+        );
+      } else if (machine.kind === "local") {
         adapter = "local";
         targetPath = await this.stageLocal(paneId, stageId, validated.extension, data);
       } else if (machine.kind === "ssh") {
         adapter = "ssh";
         targetPath = await stageSshImage(machine, paneId, stageId, validated.extension, data, false);
-      } else if (machine.kind === "powershell-ssh" && machine.sessionBackend === "agent") {
-        adapter = "windows-agent";
-        targetPath = await stageWindowsAgentPasteImage(machine, paneId, stageId, validated.extension, data);
       } else if (machine.kind === "powershell-ssh") {
         adapter = "powershell-ssh";
         targetPath = await stageSshImage(machine, paneId, stageId, validated.extension, data, true);
@@ -151,7 +158,13 @@ export class PasteImageStaging implements PasteImageStager {
       this.records.delete(record.stageId);
       await discardRecord(record).catch(() => undefined);
     }
-    if (machine.kind === "ssh" || (machine.kind === "powershell-ssh" && machine.sessionBackend !== "agent")) {
+    if (
+      (machine.kind === "ssh" && machine.sessionBackend !== "agent")
+      || (
+        machine.kind === "powershell-ssh"
+        && machine.sessionBackend !== "agent"
+      )
+    ) {
       closeSshControl(machine, paneId);
     }
   }
@@ -242,8 +255,10 @@ const validateTargetPath = (targetPath: string, adapter: StageRecord["adapter"])
   }
   const absolute = adapter === "local"
     ? path.isAbsolute(targetPath)
-    : adapter === "powershell-ssh" || adapter === "windows-agent"
+    : adapter === "powershell-ssh"
       ? /^[A-Za-z]:[\\/]/.test(targetPath)
+      : adapter === "windows-agent"
+        ? /^[A-Za-z]:[\\/]/.test(targetPath) || targetPath.startsWith("/")
       : targetPath.startsWith("/");
   if (!absolute) {
     throw new Error("staged path is not absolute");

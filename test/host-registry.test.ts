@@ -121,7 +121,7 @@ test("registration accepts only remote-safe machine fields", () => {
   }
 });
 
-test("observed-host Windows agent tokens work but never appear in public snapshots", () => {
+test("observed-host session agent tokens work but never appear in public snapshots", () => {
   const { dir, filePath } = tempRegistry();
   const registry = new HostRegistry(staticMachines, filePath);
   try {
@@ -149,6 +149,26 @@ test("observed-host Windows agent tokens work but never appear in public snapsho
     assert.equal("bootstrapToken" in result, false);
     assert.ok(registry.bootstrapToken("dynamic-win"));
     assert.doesNotMatch(JSON.stringify(registry.snapshot()), /private-agent-token|spoofed\.example/);
+
+    const posix = registry.register(
+      {
+        machine: {
+          id: "dynamic-linux",
+          name: "Dynamic Linux",
+          kind: "ssh",
+          user: "operator",
+          sessionBackend: "agent",
+          agentPort: 3482,
+          agentToken: "private-posix-token",
+        },
+      },
+      "100.70.0.9",
+    );
+    const posixMachine = registry.machines().find((entry) => entry.id === "dynamic-linux");
+    assert.equal(posixMachine?.host, "100.70.0.9");
+    assert.equal(posixMachine?.agentToken, "private-posix-token");
+    assert.equal("agentToken" in posix.machine, false);
+    assert.doesNotMatch(JSON.stringify(registry.snapshot()), /private-posix-token/);
 
     assert.throws(
       () => registry.register(

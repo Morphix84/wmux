@@ -2,6 +2,7 @@
 import argparse
 import base64
 import ctypes
+import errno
 import hashlib
 import hmac
 import json
@@ -19,6 +20,11 @@ from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, unquote, urlparse
 from urllib.request import Request, urlopen
+
+if os.name != "nt":
+    import fcntl
+    import struct
+    import termios
 
 _PROTOCOL_SEARCH_ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _PROTOCOL_SEARCH_ROOT)
@@ -42,6 +48,7 @@ MAX_PASTE_IMAGE_BYTES = 8 * 1024 * 1024
 PASTE_IMAGE_TTL_SECONDS = 60 * 60
 BACKEND_CONPTY = "conpty"
 BACKEND_STDIO = "stdio"
+BACKEND_PTY = "pty"
 
 LOCAL_TERMINAL_QUERY_RESPONSES = {
     b"\x1b[c": b"\x1b[?62;22c",
@@ -64,6 +71,10 @@ DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 30
 DEFAULT_HEARTBEAT_TIMEOUT_SECONDS = 15
 
 
+def agent_program_name() -> str:
+    return "wmux-windows-agent" if os.name == "nt" else "wmux-session-agent"
+
+
 class AgentDrainingError(RuntimeError):
     pass
 
@@ -74,8 +85,13 @@ class HeartbeatNotConfigured(RuntimeError):
 
 def paste_image_root(config: dict[str, Any]) -> str:
     configured = config_string(config, "pasteImageDir")
-    local_app_data = os.environ.get("LOCALAPPDATA") or os.path.join(os.path.expanduser("~"), "AppData", "Local")
-    return os.path.abspath(os.path.expandvars(configured) if configured else os.path.join(local_app_data, "wmux", "paste-images"))
+    if configured:
+        return os.path.abspath(os.path.expandvars(configured))
+    if os.name == "nt":
+        base = os.environ.get("LOCALAPPDATA") or os.path.join(os.path.expanduser("~"), "AppData", "Local")
+    else:
+        base = os.environ.get("XDG_RUNTIME_DIR") or os.environ.get("TMPDIR") or os.path.join(os.path.expanduser("~"), ".cache")
+    return os.path.abspath(os.path.join(base, "wmux", "paste-images"))
 
 
 def paste_image_prefix(session_id: str, stage_id: str) -> str:
@@ -379,7 +395,7 @@ def load_config(path: str) -> dict[str, Any]:
     with open(expanded, "r", encoding="utf-8") as handle:
         value = json.load(handle)
     if not isinstance(value, dict):
-        raise SystemExit(f"wmux-windows-agent: config must be a JSON object: {expanded}")
+        raise SystemExit(f"{agent_program_name()}: config must be a JSON object: {expanded}")
     return value
 
 
@@ -565,7 +581,7 @@ class RegistrationHeartbeat:
             self.status["consecutiveFailures"] = 0
             self.status["lastError"] = None
         if recovering:
-            print("wmux-windows-agent: registration heartbeat recovered", file=sys.stderr)
+            print(f"{agent_program_name()}: registration heartbeat recovered", file=sys.stderr)
         return True
 
     def _record_failure(self, message: str) -> bool:
@@ -577,12 +593,31 @@ class RegistrationHeartbeat:
             self.status["consecutiveFailures"] = int(self.status["consecutiveFailures"]) + 1
             self.status["lastError"] = message
         if changed:
-            print(f"wmux-windows-agent: {message}", file=sys.stderr)
+            print(f"{agent_program_name()}: {message}", file=sys.stderr)
         return False
 
 
 def retire_legacy_heartbeat_task(config: dict[str, Any]) -> None:
     if os.name != "nt":
+        if sys.platform.startswith("linux"):
+            try:
+                subprocess.run(
+                    [
+                        "systemctl",
+                        "--user",
+                        "disable",
+                        "--now",
+                        "wmux-heartbeat.timer",
+                        "wmux-heartbeat.service",
+                    ],
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=10,
+                    check=False,
+                )
+            except (OSError, subprocess.SubprocessError):
+                pass
         return
     task_name = os.environ.get("WMUX_HEARTBEAT_TASK") or "wmux-heartbeat"
     creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -625,7 +660,12 @@ def conpty_available() -> bool:
 
 
 def configured_backend(config: dict[str, Any]) -> str:
-    value = config_string(config, "backend", BACKEND_CONPTY).strip().lower()
+    default_backend = BACKEND_CONPTY if os.name == "nt" else BACKEND_PTY
+    value = config_string(config, "backend", default_backend).strip().lower()
+    if os.name != "nt":
+        if value in (BACKEND_STDIO, "legacy", "legacy-stdio"):
+            return BACKEND_STDIO
+        return BACKEND_PTY
     if value in (BACKEND_STDIO, "legacy", "legacy-stdio"):
         return BACKEND_STDIO
     if value == "auto":
@@ -644,6 +684,24 @@ def helper_bundle_version(config: dict[str, Any]) -> str:
         return str(value.get("bundleVersion") or "") if isinstance(value, dict) else ""
     except Exception:
         return ""
+
+
+def agent_release_version(config: dict[str, Any]) -> str:
+    configured = config_string(config, "releaseVersion")
+    if configured:
+        return configured
+    if not RELEASE_VERSION.startswith("__"):
+        return RELEASE_VERSION
+    try:
+        package_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "package.json")
+        with open(package_path, "r", encoding="utf-8") as handle:
+            version = str(json.load(handle).get("version") or "")
+        if version:
+            platform = "mac" if sys.platform == "darwin" else "linux"
+            return f"v{version}-{platform}"
+    except (OSError, ValueError, TypeError):
+        pass
+    return "v0.0.0-linux"
 
 
 def refresh_callback_state(payload: dict[str, Any]) -> None:
@@ -930,7 +988,8 @@ def session_environment(config: dict[str, Any], payload: dict[str, Any]) -> dict
 
 
 def session_command(config: dict[str, Any], payload: dict[str, Any], cwd: str) -> list[str] | str:
-    shell = str(payload.get("shell") or config_string(config, "shell", "pwsh"))
+    default_shell = "pwsh" if os.name == "nt" else os.environ.get("SHELL") or "/bin/sh"
+    shell = str(payload.get("shell") or config_string(config, "shell", default_shell))
     lower_shell = os.path.basename(shell).lower()
     if lower_shell in ("pwsh", "pwsh.exe", "powershell", "powershell.exe"):
         return powershell_command(
@@ -939,7 +998,7 @@ def session_command(config: dict[str, Any], payload: dict[str, Any], cwd: str) -
             payload.get("loadPowerShellProfile") is True,
             payload.get("agentProfileOptionalAuth") is True,
         )
-    return shell
+    return shell if os.name == "nt" else [shell, "-l"]
 
 
 class StdioBackend:
@@ -1011,6 +1070,105 @@ class StdioBackend:
                     self.process_tree.terminate()
                 except Exception:
                     pass
+
+
+class PosixPtyBackend:
+    name = BACKEND_PTY
+
+    def __init__(self, config: dict[str, Any], payload: dict[str, Any], cwd: str, cols: int, rows: int):
+        if os.name == "nt":
+            raise RuntimeError("the POSIX PTY backend is unavailable on Windows")
+        command = session_command(config, payload, cwd)
+        if not isinstance(command, list) or not command:
+            raise RuntimeError("the POSIX PTY backend requires an executable command")
+        self.lock = threading.Lock()
+        self.closed = False
+        self.master_fd, slave_fd = os.openpty()
+        self._set_size(slave_fd, cols, rows)
+
+        def prepare_child() -> None:
+            os.setsid()
+            fcntl.ioctl(slave_fd, termios.TIOCSCTTY, 0)
+
+        try:
+            self.process = subprocess.Popen(
+                command,
+                cwd=cwd if os.path.isdir(cwd) else None,
+                env=session_environment(config, payload),
+                stdin=slave_fd,
+                stdout=slave_fd,
+                stderr=slave_fd,
+                close_fds=True,
+                preexec_fn=prepare_child,
+            )
+        except Exception:
+            os.close(self.master_fd)
+            raise
+        finally:
+            os.close(slave_fd)
+
+    @property
+    def pid(self) -> int:
+        return int(self.process.pid or 0)
+
+    def write(self, data: bytes) -> None:
+        if self.closed or not data:
+            return
+        with self.lock:
+            if self.closed:
+                return
+            os.write(self.master_fd, data)
+
+    def write_terminal_response(self, data: bytes) -> None:
+        self.write(data)
+
+    def resize(self, cols: int, rows: int) -> None:
+        if self.closed:
+            return
+        with self.lock:
+            if self.closed:
+                return
+            self._set_size(self.master_fd, cols, rows)
+
+    def terminate(self) -> None:
+        with self.lock:
+            if self.closed:
+                return
+        try:
+            os.killpg(self.pid, signal.SIGHUP)
+        except ProcessLookupError:
+            return
+        try:
+            self.process.wait(timeout=1.0)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(self.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+    def read_output(self, append: Any) -> int | None:
+        try:
+            while True:
+                try:
+                    chunk = os.read(self.master_fd, 4096)
+                except OSError as error:
+                    if error.errno == errno.EIO:
+                        break
+                    raise
+                if not chunk:
+                    break
+                append(chunk)
+            return self.process.wait()
+        finally:
+            with self.lock:
+                if not self.closed:
+                    self.closed = True
+                    os.close(self.master_fd)
+
+    @staticmethod
+    def _set_size(descriptor: int, cols: int, rows: int) -> None:
+        size = struct.pack("HHHH", max(1, int(rows)), max(2, int(cols)), 0, 0)
+        fcntl.ioctl(descriptor, termios.TIOCSWINSZ, size)
 
 
 def terminalize_stdio_output(data: bytes, previous_ended_with_cr: bool = False) -> tuple[bytes, bool]:
@@ -1275,10 +1433,18 @@ class Session:
                 "cwd": self.cwd,
             }
 
-    def _create_backend(self, payload: dict[str, Any]) -> StdioBackend | ConptyBackend:
+    def _create_backend(self, payload: dict[str, Any]) -> StdioBackend | ConptyBackend | PosixPtyBackend:
         backend = configured_backend(self.config)
         if backend == BACKEND_STDIO:
             return StdioBackend(self.config, payload, self.cwd)
+        if backend == BACKEND_PTY:
+            return PosixPtyBackend(
+                self.config,
+                payload,
+                self.cwd,
+                self.cols,
+                self.rows,
+            )
         return ConptyBackend(self.config, payload, self.cwd, self.cols, self.rows)
 
     def _read_output(self) -> None:
@@ -1445,7 +1611,7 @@ class Handler(BaseHTTPRequestHandler):
     state: AgentState
 
     def log_message(self, message: str, *args: Any) -> None:
-        print(f"wmux-windows-agent: {self.address_string()} {message % args}", file=sys.stderr)
+        print(f"{agent_program_name()}: {self.address_string()} {message % args}", file=sys.stderr)
 
     def authorized(self) -> bool:
         expected = str(self.state.config.get("token") or os.environ.get("WMUX_AGENT_TOKEN") or "")
@@ -1462,20 +1628,21 @@ class Handler(BaseHTTPRequestHandler):
         parts = [unquote(part) for part in parsed.path.strip("/").split("/") if part]
         if parsed.path == WINDOWS_AGENT_HEALTH_PATH:
             lifecycle = self.state.health()
+            release_version = agent_release_version(self.state.config)
             self.send_json(
                 {
                     "ok": True,
                     # `version` remains as a transition alias for wmux servers
                     # that predate the structured release/protocol fields.
-                    "version": RELEASE_VERSION,
-                    "releaseVersion": RELEASE_VERSION,
+                    "version": release_version,
+                    "releaseVersion": release_version,
                     "protocolVersion": PROTOCOL_VERSION,
                     "capabilities": list(WINDOWS_AGENT_CAPABILITIES),
                     "machine": config_string(self.state.config, "machine", "windows"),
                     "pid": os.getpid(),
                     **lifecycle,
                     "backend": self.state.backend,
-                    "processTree": "windows-job",
+                    "processTree": "windows-job" if os.name == "nt" else "posix-session",
                     "helperBundleVersion": self.state.helper_bundle_version,
                     "conptyAvailable": conpty_available(),
                     "pywinptyAvailable": pywinpty_available(),
@@ -1630,8 +1797,14 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(prog="wmux-windows-agent")
-    parser.add_argument("--config", default=os.environ.get("WMUX_WINDOWS_AGENT_CONFIG", "~/.wmux/windows-agent.json"))
+    program = agent_program_name()
+    default_config = (
+        os.environ.get("WMUX_WINDOWS_AGENT_CONFIG", "~/.wmux/windows-agent.json")
+        if os.name == "nt"
+        else os.environ.get("WMUX_SESSION_AGENT_CONFIG", "~/.wmux/session-agent.json")
+    )
+    parser = argparse.ArgumentParser(prog=program)
+    parser.add_argument("--config", default=default_config)
     parser.add_argument("--host", default="")
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--allow-public-bind", action="store_true")
@@ -1640,7 +1813,7 @@ def main() -> int:
     host = args.host or config_string(config, "host", "127.0.0.1")
     port = args.port or config_int(config, "port", 3481)
     if not args.allow_public_bind and not is_private_bind_host(host):
-        raise SystemExit(f"wmux-windows-agent: refusing to bind non-private host {host}")
+        raise SystemExit(f"{program}: refusing to bind non-private host {host}")
     Handler.state = AgentState(config)
     server = ThreadingHTTPServer((host, port), Handler)
     registration_heartbeat = RegistrationHeartbeat(config, args.config, int(server.server_address[1]))
@@ -1650,7 +1823,7 @@ def main() -> int:
         retire_legacy_heartbeat_task(config)
     if registration_heartbeat.enabled:
         registration_heartbeat.start()
-    print(f"wmux-windows-agent: listening on http://{host}:{port}", file=sys.stderr)
+    print(f"{program}: listening on http://{host}:{port}", file=sys.stderr)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

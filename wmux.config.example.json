@@ -71,6 +71,17 @@
       "sessionBackend": "auto"
     },
     {
+      "id": "linux-agent-box",
+      "name": "Linux Agent Box",
+      "kind": "ssh",
+      "platform": "linux",
+      "host": "100.64.0.21",
+      "user": "operator",
+      "sessionBackend": "agent",
+      "agentPort": 3481,
+      "agentToken": "replace-with-a-long-random-token"
+    },
+    {
       "id": "windows-box",
       "name": "Windows Box",
       "kind": "powershell-ssh",
@@ -80,6 +91,7 @@
       "port": 22,
       "sessionBackend": "agent",
       "agentPort": 3481,
+      "agentToken": "replace-with-a-long-random-token",
       "loadPowerShellProfile": true
     }
   ]

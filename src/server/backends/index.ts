@@ -1,6 +1,6 @@
 import type { PasteImageStager } from "../paste-image-staging.js";
 import type { MachineConfig } from "../types.js";
-import { shouldUseWindowsAgent } from "../windows-agent.js";
+import { shouldUseSessionAgent } from "../windows-agent.js";
 import type { SessionBackend } from "./backend.js";
 import type { BackendCapabilities } from "./backend.js";
 import {
@@ -24,20 +24,20 @@ export const createSessionBackend = (
   pasteImages: PasteImageStager,
 ): SessionBackend => {
   const snapshot = structuredClone(machine);
-  if (shouldUseWindowsAgent(snapshot)) return new WindowsAgentBackend(snapshot, pasteImages);
+  if (shouldUseSessionAgent(snapshot)) return new WindowsAgentBackend(snapshot, pasteImages);
   if (isDurableMultiplexerMachine(snapshot)) return new DurableMultiplexerBackend(snapshot, pasteImages);
   return new RawPtyBackend(snapshot, pasteImages);
 };
 
 export const sessionBackendKindForMachine = (machine: MachineConfig): SessionBackend["id"] =>
-  shouldUseWindowsAgent(machine)
+  shouldUseSessionAgent(machine)
     ? "windows-agent"
     : isDurableMultiplexerMachine(machine)
       ? "durable-multiplexer"
       : "raw-pty";
 
 export const sessionBackendCapabilitiesForMachine = (machine: MachineConfig): BackendCapabilities =>
-  shouldUseWindowsAgent(machine)
+  shouldUseSessionAgent(machine)
     ? WINDOWS_AGENT_CAPABILITIES
     : isDurableMultiplexerMachine(machine)
       ? durableMultiplexerCapabilities(machine)

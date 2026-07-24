@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import http from "node:http";
 import test from "node:test";
+import { WINDOWS_AGENT_PROTOCOL_VERSION } from "../src/shared/windows-agent-protocol.js";
 import {
   machineReleaseVersion,
   resolveMachinePlatform,
@@ -117,4 +119,45 @@ test("offline registered status preserves heartbeat metadata without exposing cr
   assert.match(status.reason ?? "", /^Offline; last seen /);
   assert.doesNotMatch(JSON.stringify(status), /private-agent-token/);
   assert.equal("agentToken" in status, false);
+});
+
+test("POSIX agent status probes the owning process instead of the SSH port", async () => {
+  const releaseVersion = machineReleaseVersion({
+    id: "posix",
+    name: "POSIX",
+    kind: "ssh",
+    platform: "linux",
+  });
+  const server = http.createServer((_request, response) => {
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify({
+      ok: true,
+      releaseVersion,
+      protocolVersion: WINDOWS_AGENT_PROTOCOL_VERSION,
+      backend: "pty",
+      processTree: "posix-session",
+    }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const [status] = await resolveMachineStatuses([{
+      id: "posix",
+      name: "POSIX",
+      kind: "ssh",
+      platform: "linux",
+      host: "192.0.2.1",
+      port: 1,
+      sessionBackend: "agent",
+      agentUrl: `http://127.0.0.1:${address.port}`,
+      agentToken: "private-agent-token",
+    }]);
+    assert.equal(status.reachable, true);
+    assert.equal(status.versionStatus, "current");
+    assert.match(status.backendDetail ?? "", /POSIX agent.*pty.*posix-session/);
+    assert.doesNotMatch(JSON.stringify(status), /private-agent-token/);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
 });
