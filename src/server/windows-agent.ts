@@ -46,6 +46,9 @@ const UPDATE_RESTART_TIMEOUT_MS = 60_000;
 
 export const windowsAgentUrl = (machine: MachineConfig): string | undefined => {
   if (machine.agentUrl) return machine.agentUrl.replace(/\/+$/, "");
+  if (machine.kind === "local" && machine.sessionBackend === "agent") {
+    return `http://127.0.0.1:${machine.agentPort ?? 3481}`;
+  }
   if (!machine.host) return undefined;
   const host = net.isIP(machine.host) === 6 ? `[${machine.host}]` : machine.host;
   return `http://${host}:${machine.agentPort ?? 3481}`;
@@ -53,6 +56,13 @@ export const windowsAgentUrl = (machine: MachineConfig): string | undefined => {
 
 export const shouldUseWindowsAgent = (machine: MachineConfig): boolean =>
   machine.kind === "powershell-ssh" && machine.sessionBackend === "agent";
+
+export const shouldUsePosixAgent = (machine: MachineConfig): boolean =>
+  (machine.kind === "local" || machine.kind === "ssh")
+  && machine.sessionBackend === "agent";
+
+export const shouldUseSessionAgent = (machine: MachineConfig): boolean =>
+  shouldUseWindowsAgent(machine) || shouldUsePosixAgent(machine);
 
 export const deleteWindowsAgentSession = (machine: MachineConfig, paneId: string): void => {
   const url = windowsAgentUrl(machine);
@@ -164,6 +174,42 @@ export const probeWindowsAgent = async (
     return candidates.find(isCurrent) ?? primary;
   } catch {
     return primary;
+  }
+};
+
+export const probePosixAgent = async (
+  machine: MachineConfig,
+  timeoutMs = 1500,
+): Promise<{
+  reachable: boolean;
+  health?: WindowsAgentHealth;
+  reason?: string;
+  url?: string;
+}> => {
+  const url = windowsAgentUrl(machine);
+  if (!url) return { reachable: false, reason: "missing POSIX agent URL" };
+  try {
+    const health = await requestJson<WindowsAgentHealth>(
+      "GET",
+      `${url}${WINDOWS_AGENT_PATHS.health}`,
+      undefined,
+      timeoutMs,
+      authHeaders(machine),
+    );
+    return {
+      reachable: health.ok === true,
+      health,
+      url,
+      reason: health.ok === true ? undefined : "agent health check failed",
+    };
+  } catch (error) {
+    return {
+      reachable: false,
+      url,
+      reason: error instanceof Error
+        ? error.message
+        : "agent health check failed",
+    };
   }
 };
 
@@ -283,9 +329,16 @@ export class WindowsAgentSession extends EventEmitter<AgentEvents> {
 
   kill(): void {
     if (this.stopped) return;
-    this.detach();
+    this.stopped = true;
+    this.checkpoint.dispose();
+    this.resolveAttachReady();
     void this.delete(WINDOWS_AGENT_PATHS.session(this.pane.id))
-      .catch((error) => this.reportTransportFailure("delete", error, false));
+      .catch((error) => this.reportTransportFailure("delete", error, false))
+      .finally(() => {
+        if (this.exited) return;
+        this.exited = true;
+        this.emit("exit", this.exitCode);
+      });
   }
 
   detach(): void {
@@ -307,10 +360,35 @@ export class WindowsAgentSession extends EventEmitter<AgentEvents> {
 
   private async start(): Promise<void> {
     try {
-      this.reportPhase("checking-agent", "Checking Windows agent…");
-      const helperBundle = buildWindowsHelperBundle(this.machine);
-      if (!await this.ensureCurrentAgent(helperBundle)) return;
-      this.reportPhase("creating-session", `Opening PowerShell on ${this.machine.name}…`);
+      const windows = shouldUseWindowsAgent(this.machine);
+      this.reportPhase(
+        "checking-agent",
+        windows ? "Checking Windows agent…" : "Checking POSIX agent…",
+      );
+      const helperBundle = windows
+        ? buildWindowsHelperBundle(this.machine)
+        : undefined;
+      if (windows) {
+        if (!await this.ensureCurrentAgent(helperBundle!)) return;
+      } else {
+        const health = await this.get<WindowsAgentHealth>(
+          WINDOWS_AGENT_PATHS.health,
+          3000,
+        );
+        if (
+          health.ok !== true
+          || (health.protocolVersion ?? 0)
+            < expectedWindowsAgentProtocolVersion()
+        ) {
+          throw new Error("POSIX agent protocol is unavailable or outdated");
+        }
+      }
+      this.reportPhase(
+        "creating-session",
+        windows
+          ? `Opening PowerShell on ${this.machine.name}…`
+          : `Opening shell on ${this.machine.name}…`,
+      );
       const response = await this.post<AgentSessionResponse>(
         WINDOWS_AGENT_PATHS.session(this.pane.id),
         {
@@ -320,7 +398,10 @@ export class WindowsAgentSession extends EventEmitter<AgentEvents> {
           shell: this.machine.shell || "",
           loadPowerShellProfile: this.machine.loadPowerShellProfile === true,
           agentProfileOptionalAuth: this.machine.source === "registered",
-          helperBundle: { bundleVersion: helperBundle.bundleVersion, files: helperBundle.files },
+          helperBundle: {
+            bundleVersion: helperBundle?.bundleVersion ?? "",
+            files: helperBundle?.files ?? [],
+          },
           env: {
             WMUX_MACHINE_ID: this.machine.id,
             WMUX_MACHINE_NAME: this.machine.name,
@@ -364,7 +445,12 @@ export class WindowsAgentSession extends EventEmitter<AgentEvents> {
         this.resolveAttachReady();
         return;
       }
-      this.appendAndEmit(`\r\n[wmux] Windows agent attach failed: ${formatError(error)}\r\n`);
+      const label = shouldUseWindowsAgent(this.machine)
+        ? "Windows"
+        : "POSIX";
+      this.appendAndEmit(
+        `\r\n[wmux] ${label} agent attach failed: ${formatError(error)}\r\n`,
+      );
       this.exited = true;
       this.resolveAttachReady();
       this.emit("exit", 1);

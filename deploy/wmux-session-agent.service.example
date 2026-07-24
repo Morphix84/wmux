@@ -1,0 +1,17 @@
+[Unit]
+Description=wmux POSIX session agent
+After=network-online.target tailscaled.service
+Wants=network-online.target
+ConditionPathExists=%h/.wmux/session-agent.json
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/wmux-session-agent
+Restart=always
+RestartSec=2
+KillMode=control-group
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

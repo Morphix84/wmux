@@ -69,14 +69,11 @@ const registeredMachineObjectSchema = z.object({
 type RegisteredMachineInput = z.infer<typeof registeredMachineObjectSchema>;
 
 const validateRegisteredMachine = (machine: RegisteredMachineInput, context: z.RefinementCtx): void => {
-  if (machine.kind === "ssh" && machine.sessionBackend === "agent") {
-    context.addIssue({ code: z.ZodIssueCode.custom, path: ["sessionBackend"], message: "agent is Windows-only" });
-  }
-  if (machine.kind === "ssh" && (machine.shell || machine.agentPort)) {
+  if (machine.kind === "ssh" && machine.shell) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
-      path: machine.shell ? ["shell"] : ["agentPort"],
-      message: "Windows-only fields are not valid for ssh machines",
+      path: ["shell"],
+      message: "shell is not valid for ssh machines",
     });
   }
   if (machine.kind === "powershell-ssh" && ["tmux", "screen"].includes(machine.sessionBackend ?? "")) {

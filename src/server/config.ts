@@ -78,6 +78,16 @@ export const machineSchema = z.object({
       message: "loadPowerShellProfile is only valid for powershell-ssh machines",
     });
   }
+  if (
+    machine.sessionBackend === "agent"
+    && !["local", "ssh", "powershell-ssh"].includes(machine.kind)
+  ) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["sessionBackend"],
+      message: "agent is only valid for local, ssh, and powershell-ssh machines",
+    });
+  }
 });
 
 const keybindingOverridesSchema = z.record(z.array(z.string().min(1).max(80)).max(16)).superRefine((bindings, context) => {

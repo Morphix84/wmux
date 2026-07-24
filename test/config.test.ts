@@ -41,6 +41,31 @@ test("Windows agent ports reserve the bounded rollout range", () => {
   assert.equal(configSchema.safeParse(windowsAgent(65528)).success, false);
 });
 
+test("native session agents are limited to supported machine transports", () => {
+  assert.ok(configSchema.safeParse(machine({
+    kind: "ssh",
+    sessionBackend: "agent",
+    agentPort: 3481,
+    agentToken: "secret",
+  })).success);
+  assert.ok(configSchema.safeParse({
+    machines: [{
+      id: "local-agent",
+      name: "Local agent",
+      kind: "local",
+      sessionBackend: "agent",
+      agentUrl: "http://127.0.0.1:3481",
+      agentToken: "secret",
+    }],
+  }).success);
+  for (const kind of ["powershell", "service"]) {
+    assert.equal(configSchema.safeParse(machine({
+      kind,
+      sessionBackend: "agent",
+    })).success, false);
+  }
+});
+
 test("validates terminal typography defaults", () => {
   assert.ok(configSchema.safeParse({
     terminalFontFamily: '"JetBrains Mono", "Cascadia Code"',

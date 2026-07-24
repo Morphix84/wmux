@@ -9,7 +9,12 @@ import {
   expectedWindowsAgentReleaseVersion,
   windowsHelperBundleVersion,
 } from "./windows-helpers.js";
-import { probeWindowsAgent, shouldUseWindowsAgent } from "./windows-agent.js";
+import {
+  probePosixAgent,
+  probeWindowsAgent,
+  shouldUsePosixAgent,
+  shouldUseWindowsAgent,
+} from "./windows-agent.js";
 import { resolveHelperUrl } from "./helper-url.js";
 import { wmuxReleaseVersion } from "./version.js";
 
@@ -248,6 +253,41 @@ export const resolveMachineStatuses = async (
           backendDetail: backendDetail(machine),
         };
       }
+      if (shouldUsePosixAgent(machine)) {
+        const agent = await probePosixAgent(machine);
+        const reachable = agent.reachable;
+        const runtimeVersion = agent.health?.releaseVersion ?? agent.health?.version;
+        const expectedRuntimeVersion = machineReleaseVersion(machine);
+        const runtimeProtocolVersion = agent.health?.protocolVersion;
+        const expectedRuntimeProtocolVersion = expectedWindowsAgentProtocolVersion();
+        return {
+          ...publicMachine,
+          reachable,
+          checkedAt,
+          endpoint: agent.url,
+          backendDetail: posixAgentStatusDetail(agent),
+          runtimeVersion,
+          expectedRuntimeVersion,
+          runtimeProtocolVersion,
+          expectedRuntimeProtocolVersion,
+          versionStatus: resolveMachineVersionStatus({
+            reachable,
+            runtimeVersion,
+            expectedRuntimeVersion,
+            runtimeProtocolVersion,
+            expectedRuntimeProtocolVersion,
+          }),
+          reason: reachable
+            ? undefined
+            : `POSIX agent unavailable: ${agent.reason ?? "unknown error"}`,
+          health: {
+            agentReachable: reachable,
+            agentUrl: agent.url,
+            agentHealth: agent.health,
+            agentReason: agent.reason,
+          },
+        };
+      }
       if (machine.kind === "local") {
         const runtimeVersion = machineReleaseVersion(machine);
         if (machine.cwd) {
@@ -427,6 +467,7 @@ const publicMachineStatusBase = (machine: MachineConfig): Omit<MachineStatus, "r
 
 const localBackendDetail = (machine: MachineConfig): string => {
   const backend = machine.sessionBackend ?? "auto";
+  if (backend === "agent") return "POSIX agent backend";
   if (backend === "pty") return "raw PTY; not restart-durable";
   const tmux = commandExists("tmux") ? "tmux available" : "tmux missing";
   const screen = commandExists("screen") ? "screen available" : "screen missing";
@@ -435,12 +476,25 @@ const localBackendDetail = (machine: MachineConfig): string => {
 
 export const backendDetail = (machine: MachineConfig): string => {
   const backend = machine.sessionBackend ?? "auto";
+  if ((machine.kind === "local" || machine.kind === "ssh") && backend === "agent") {
+    return "POSIX agent backend";
+  }
   if (machine.kind === "ssh") return `SSH client; ${backend} durable backend on attach`;
   if (machine.kind === "powershell") return "PowerShell remoting; no durable backend";
   if (machine.kind === "powershell-ssh" && backend === "agent") return "Windows agent backend";
   if (machine.kind === "powershell-ssh") return "SSH-launched PowerShell; no durable backend";
   if (machine.kind === "service") return "wmux remote service probe";
   return localBackendDetail(machine);
+};
+
+const posixAgentStatusDetail = (
+  agent: Awaited<ReturnType<typeof probePosixAgent>>,
+): string => {
+  if (!agent.reachable) return `POSIX agent unavailable at ${agent.url ?? "unknown URL"}`;
+  const release = agent.health?.releaseVersion ?? agent.health?.version ?? "ready";
+  const backend = agent.health?.backend ? `; ${agent.health.backend}` : "";
+  const processTree = agent.health?.processTree ? `; ${agent.health.processTree}` : "";
+  return `POSIX agent ${release}${backend}${processTree} at ${agent.url}`;
 };
 
 const windowsStatusDetail = (
