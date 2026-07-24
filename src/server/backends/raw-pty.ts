@@ -87,8 +87,9 @@ export class RawPtyBackend implements SessionBackend {
     else session.kill();
   }
 
-  async dispose(_paneId: string, session?: BackendSession, options: { kill?: boolean } = {}): Promise<void> {
+  async dispose(_paneId: string, session?: BackendSession, options: { kill?: boolean } = {}): Promise<boolean> {
     if (options.kill !== false) session?.kill();
+    return true;
   }
 
   async readCwd(_paneId: string): Promise<string | undefined> {

@@ -4,7 +4,8 @@ import { defineConfig, devices } from "@playwright/test";
 
 const port = 3489;
 const runtimeDir = path.resolve("test-results", `e2e-runtime-${process.pid}`);
-fs.mkdirSync(runtimeDir, { recursive: true });
+fs.mkdirSync(runtimeDir, { recursive: true, mode: 0o700 });
+fs.chmodSync(runtimeDir, 0o700);
 const runtimeConfigPath = path.join(runtimeDir, "wmux.config.json");
 const fixtureConfig = JSON.parse(
   fs.readFileSync(path.resolve("e2e", "fixtures", "wmux.config.json"), "utf8"),

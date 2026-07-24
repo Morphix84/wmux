@@ -20,6 +20,7 @@ import {
   type PasteImageStager,
   type StagedPasteImage,
 } from "./paste-image-staging.js";
+import { DurableEndpointStore } from "./durable-endpoint-store.js";
 
 export type ClientMessage = PaneClientMessage;
 
@@ -123,6 +124,7 @@ export class SessionManager {
   private durableRefreshTimers = new Set<ReturnType<typeof setTimeout>>();
   private readonly currentMachines: () => MachineConfig[];
   private readonly terminalCheckpoints: TerminalCheckpointStore;
+  private readonly durableEndpoints: DurableEndpointStore;
 
   constructor(
     private readonly state: StateStore,
@@ -136,6 +138,7 @@ export class SessionManager {
     private readonly browserAuthMode: BrowserAuthMode = "shared-or-login",
     readonly agentSessions = new AgentSessionService(state),
     terminalCheckpoints?: TerminalCheckpointStore,
+    durableEndpoints?: DurableEndpointStore,
   ) {
     this.currentMachines = typeof machines === "function" ? machines : () => machines;
     this.terminalCheckpoints = terminalCheckpoints
@@ -147,6 +150,18 @@ export class SessionManager {
       state.snapshot().workspaces.flatMap((workspace) =>
         workspace.tabs.flatMap((tab) => tab.panes.map((pane) => pane.id))),
     ));
+    this.durableEndpoints = durableEndpoints
+      ?? new DurableEndpointStore(
+        process.env.WMUX_SESSION_ENDPOINT_PATH
+          ?? path.join(state.storageDirectory(), "session-endpoints.json"),
+      );
+    this.durableEndpoints.reconcile(
+      new Set(
+        state.snapshot().workspaces.flatMap((workspace) =>
+          workspace.tabs.flatMap((tab) => tab.panes.map((pane) => pane.id))),
+      ),
+      this.currentMachines(),
+    );
   }
 
   hasLiveSessionsForMachine(machineId: string): boolean {
@@ -376,7 +391,8 @@ export class SessionManager {
   private ensureSession(pane: PaneState, cols: number, rows: number): BackendSession {
     const existing = this.sessions.get(pane.id);
     if (existing && !existing.isExited) return existing;
-    const previousSessionMachine = this.sessionMachines.get(pane.id);
+    const previousSessionMachine = this.sessionMachines.get(pane.id)
+      ?? this.durableEndpoints.activeForPane(pane.id)?.machine;
     const configuredMachine = this.currentMachines().find((candidate) => candidate.id === pane.machineId);
     if (!configuredMachine) throw new Error(`machine ${pane.machineId} not found`);
     const machine = pane.agentPort && configuredMachine.kind === "powershell-ssh"
@@ -430,6 +446,7 @@ export class SessionManager {
     this.sessions.set(pane.id, session);
     this.backends.set(pane.id, backend);
     this.sessionMachines.set(pane.id, structuredClone(machine));
+    this.durableEndpoints.bind(pane.id, machine, backend.id);
     this.state.updatePane(pane.id, { status: "running", exitCode: undefined, title: pane.title });
     this.schedulePaneCwdRefresh(pane, machine, session);
 
@@ -449,6 +466,7 @@ export class SessionManager {
       machine.agentPort = agentPort;
       machine.agentUrl = undefined;
       this.sessionMachines.set(pane.id, structuredClone(machine));
+      this.durableEndpoints.updateActive(pane.id, machine);
       this.state.updatePane(pane.id, { agentPort });
     });
     session.on("phase", (phase, label) => {
@@ -495,6 +513,7 @@ export class SessionManager {
       this.terminalCheckpoints.delete(pane.id);
       this.backends.delete(pane.id);
       this.sessionMachines.delete(pane.id);
+      this.durableEndpoints.deleteActiveForPane(pane.id);
       this.paneInputEpochs.delete(pane.id);
       if (exitedMachine) void this.pasteImages.cleanupPane(pane.id, exitedMachine);
       if (context.tab.panes.length > 1) {
@@ -663,8 +682,15 @@ export class SessionManager {
     this.sessions.delete(pane.id);
     this.resizeOwners.delete(pane.id);
     const backend = this.backends.get(pane.id);
-    if (backend) void backend.dispose(pane.id, existing, { kill: true }).catch(() => undefined);
-    else existing.kill();
+    if (backend) {
+      void backend.dispose(pane.id, existing, { kill: true })
+        .then((cleaned) => {
+          if (cleaned) this.durableEndpoints.deleteActiveForPane(pane.id);
+        })
+        .catch(() => undefined);
+    } else {
+      existing.kill();
+    }
     this.backends.delete(pane.id);
     return true;
   }
@@ -743,6 +769,7 @@ export class SessionManager {
     const session = this.sessions.get(paneId);
     const backend = this.backends.get(paneId);
     const sessionMachine = this.sessionMachines.get(paneId);
+    const endpointRecords = this.durableEndpoints.recordsForPane(paneId);
     this.sessions.delete(paneId);
     this.backends.delete(paneId);
     this.sessionMachines.delete(paneId);
@@ -751,11 +778,13 @@ export class SessionManager {
     this.terminalCheckpoints.delete(paneId);
     const fallbackMachineId = machineId ?? session?.pane.machineId ?? this.state.findPane(paneId)?.machineId;
     const machine = resolveDisposalMachine(sessionMachine, this.currentMachines(), fallbackMachineId);
-    if (backend) {
-      void backend.dispose(paneId, session, { kill: true });
-    } else if (machine) {
-      void createSessionBackend(machine, this.pasteImages).dispose(paneId, undefined, { kill: true });
-    }
+    void this.cleanupPaneEndpoints(
+      paneId,
+      endpointRecords,
+      backend,
+      session,
+      machine,
+    );
     if (machine) {
       void this.pasteImages.cleanupPane(paneId, machine);
     }
@@ -769,6 +798,47 @@ export class SessionManager {
     }
     this.sockets.delete(paneId);
     this.outputWatchers.delete(paneId);
+  }
+
+  private async cleanupPaneEndpoints(
+    paneId: string,
+    endpointRecords: ReturnType<DurableEndpointStore["recordsForPane"]>,
+    backend: SessionBackend | undefined,
+    session: BackendSession | undefined,
+    fallbackMachine: MachineConfig | undefined,
+  ): Promise<void> {
+    let liveRecordId: string | undefined;
+    if (backend) {
+      const active = endpointRecords.find((record) =>
+        record.status === "active"
+        && record.backend === backend.id
+        && sameMachineEndpoint(record.machine, backend.machine));
+      liveRecordId = active?.id;
+      try {
+        const cleaned = await backend.dispose(paneId, session, { kill: true });
+        if (cleaned && liveRecordId) this.durableEndpoints.delete(liveRecordId);
+      } catch {
+        // The retained endpoint record keeps failed cleanup visible to audit.
+      }
+    } else if (fallbackMachine && endpointRecords.length === 0) {
+      try {
+        await createSessionBackend(fallbackMachine, this.pasteImages)
+          .dispose(paneId, undefined, { kill: true });
+      } catch {
+        // Static machine cleanup remains best effort.
+      }
+    }
+
+    for (const record of endpointRecords) {
+      if (record.id === liveRecordId) continue;
+      try {
+        const cleaned = await createSessionBackend(record.machine, this.pasteImages)
+          .dispose(paneId, undefined, { kill: true });
+        if (cleaned) this.durableEndpoints.delete(record.id);
+      } catch {
+        // The retained endpoint record keeps failed cleanup visible to audit.
+      }
+    }
   }
 
   private scheduleTerminalCheckpoint(

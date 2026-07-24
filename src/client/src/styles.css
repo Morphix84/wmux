@@ -5182,7 +5182,8 @@ button.active-tool {
 }
 
 .session-audit-row.duplicate span:first-child,
-.session-audit-row.missing span:first-child {
+.session-audit-row.missing span:first-child,
+.session-audit-row.unreachable span:first-child {
   color: var(--gold);
 }
 

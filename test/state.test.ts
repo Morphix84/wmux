@@ -41,6 +41,16 @@ test("fresh store creates one workspace and persists atomically", () => {
   });
 });
 
+test("fresh state storage creates an owner-only directory", () => {
+  withTempState((_filePath, dir) => {
+    const storageDirectory = path.join(dir, "new-storage");
+    const filePath = path.join(storageDirectory, "state.json");
+    new StateStore(machines, filePath);
+    assert.equal(fs.statSync(storageDirectory).mode & 0o777, 0o700);
+    assert.equal(fs.statSync(filePath).mode & 0o777, 0o600);
+  });
+});
+
 test("agent workspace children are preorder-first and parent deletion promotes them", () => {
   withTempState((filePath) => {
     const store = new StateStore(machines, filePath);

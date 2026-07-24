@@ -192,7 +192,10 @@ export class StateStore extends EventEmitter {
   }
 
   private writeToDisk(): void {
-    fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
+    const directory = path.dirname(this.filePath);
+    const directoryExists = fs.existsSync(directory);
+    fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+    if (!directoryExists) fs.chmodSync(directory, 0o700);
     // Write to a temp file and rename so a crash or ENOSPC mid-write can never
     // truncate the live state file — rename is atomic on the same filesystem.
     const tempPath = `${this.filePath}.tmp`;

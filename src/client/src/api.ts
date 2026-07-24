@@ -211,8 +211,13 @@ export const api = {
       `/api/registry/hosts/${encodeURIComponent(machineId)}`,
       { method: "DELETE" },
     ),
-  cleanupSession: (backend: "tmux" | "screen", name: string) =>
-    json<DurableSessionAudit>(`/api/session-audit/${backend}/${encodeURIComponent(name)}`, { method: "DELETE" }),
+  cleanupSession: (backend: "tmux" | "screen" | "agent", name: string, cleanupKey?: string) => {
+    const query = cleanupKey ? `?endpoint=${encodeURIComponent(cleanupKey)}` : "";
+    return json<DurableSessionAudit>(
+      `/api/session-audit/${backend}/${encodeURIComponent(name)}${query}`,
+      { method: "DELETE" },
+    );
+  },
   updateSettings: (settings: ModalSettingsUpdate) =>
     json<{ settings: WmuxSettings; state: BootstrapPayload }>("/api/settings", {
       method: "POST",

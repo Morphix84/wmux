@@ -4,6 +4,8 @@ import { runCommand } from "./child-process.js";
 const shellQuote = (value: string): string => `'${value.replace(/'/g, "'\\''")}'`;
 const remotePathBootstrap = (): string => `export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/opt/local/bin:$PATH"`;
 const CWD_OUTPUT_PREFIX = "wmux-cwd:";
+const TMUX_AUDIT_PREFIX = "__WMUX_TMUX__";
+const SCREEN_AUDIT_PREFIX = "__WMUX_SCREEN__";
 
 export const durableSessionName = (paneId?: string): string =>
   `wmux_${(paneId || "unknown").replace(/[^A-Za-z0-9_-]/g, "_")}`;
@@ -65,10 +67,13 @@ export const refreshDurableSessionClient = async (
   return results.some((result) => result.status === 0);
 };
 
-export const disposeDurableSession = async (machine: MachineConfig, paneId: string): Promise<void> => {
+export const disposeDurableSession = async (
+  machine: MachineConfig,
+  paneId: string,
+): Promise<boolean> => {
   const backend = machine.sessionBackend ?? "auto";
-  if (backend === "pty" || backend === "agent" || machine.command?.length) return;
-  if (machine.kind !== "local" && machine.kind !== "ssh") return;
+  if (backend === "pty" || backend === "agent" || machine.command?.length) return false;
+  if (machine.kind !== "local" && machine.kind !== "ssh") return false;
   const sessionName = durableSessionName(paneId);
   const killScript = [
     machine.kind === "ssh" ? remotePathBootstrap() : "",
@@ -78,11 +83,99 @@ export const disposeDurableSession = async (machine: MachineConfig, paneId: stri
     .filter(Boolean)
     .join("; ");
   if (machine.kind === "local") {
-    await runCommand("/bin/sh", ["-lc", killScript], { timeoutMs: 3000, captureOutput: false });
-    return;
+    const result = await runCommand("/bin/sh", ["-lc", killScript], { timeoutMs: 3000, captureOutput: false });
+    return result.status === 0;
   }
-  await runRemote(machine, killScript, 5000, false);
+  const result = await runRemote(machine, killScript, 5000, false);
+  return result?.status === 0;
 };
+
+export interface DurableSessionObservation {
+  backend: "tmux" | "screen";
+  name: string;
+  paneId: string;
+  attached: boolean;
+  detail: string;
+}
+
+export interface DurableSessionObservationResult {
+  reachable: boolean;
+  detail?: string;
+  sessions: DurableSessionObservation[];
+}
+
+export const listDurableSessionsOnMachine = async (
+  machine: MachineConfig,
+): Promise<DurableSessionObservationResult> => {
+  if (machine.kind !== "local" && machine.kind !== "ssh") {
+    return { reachable: false, detail: "unsupported machine kind", sessions: [] };
+  }
+  const tmuxFormat = "#{session_name}\t#{session_attached}\t#{session_windows}";
+  const script = [
+    machine.kind === "ssh" ? remotePathBootstrap() : "",
+    `printf '${TMUX_AUDIT_PREFIX}\\n'`,
+    `command -v tmux >/dev/null 2>&1 && tmux list-sessions -F ${shellQuote(tmuxFormat)} 2>/dev/null || true`,
+    `printf '${SCREEN_AUDIT_PREFIX}\\n'`,
+    "command -v screen >/dev/null 2>&1 && screen -ls 2>/dev/null || true",
+  ].filter(Boolean).join("; ");
+  const result = machine.kind === "local"
+    ? await runCommand("/bin/sh", ["-lc", script], { timeoutMs: 3000 })
+    : await runRemote(machine, script, 5000);
+  if (!result || result.status !== 0) {
+    return {
+      reachable: false,
+      detail: result?.stderr.trim() || result?.stdout.trim() || "endpoint unreachable",
+      sessions: [],
+    };
+  }
+  return {
+    reachable: true,
+    sessions: parseDurableSessionObservations(result.stdout),
+  };
+};
+
+export const parseDurableSessionObservations = (
+  output: string,
+): DurableSessionObservation[] => {
+  const tmuxStart = output.indexOf(TMUX_AUDIT_PREFIX);
+  const screenStart = output.indexOf(SCREEN_AUDIT_PREFIX);
+  if (tmuxStart < 0 || screenStart < tmuxStart) return [];
+  const tmux = output
+    .slice(tmuxStart + TMUX_AUDIT_PREFIX.length, screenStart)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .flatMap((line): DurableSessionObservation[] => {
+      const [name, attached, windows] = line.split("\t");
+      if (!name?.startsWith("wmux_")) return [];
+      return [{
+        backend: "tmux",
+        name,
+        paneId: paneIdFromDurableSession(name),
+        attached: Number(attached) > 0,
+        detail: `${attached || 0} attached, ${windows || 0} windows`,
+      }];
+    });
+  const screen = output
+    .slice(screenStart + SCREEN_AUDIT_PREFIX.length)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .flatMap((line): DurableSessionObservation[] => {
+      const match = line.match(/^(?:\d+\.)?(wmux_[^\s]+)\s+\([^)]+\)\s+\(([^)]+)\)/);
+      if (!match) return [];
+      return [{
+        backend: "screen",
+        name: match[1],
+        paneId: paneIdFromDurableSession(match[1]),
+        attached: /attached/i.test(match[2]),
+        detail: match[2],
+      }];
+    });
+  return [...tmux, ...screen];
+};
+
+const paneIdFromDurableSession = (name: string): string =>
+  name.startsWith("wmux_") ? name.slice("wmux_".length) : "";
 
 const runRemote = async (
   machine: MachineConfig,
