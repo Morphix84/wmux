@@ -113,12 +113,16 @@ export function SettingsModal({
     }
   };
 
-  const cleanupSession = async (backend: "tmux" | "screen", name: string) => {
+  const cleanupSession = async (
+    backend: "tmux" | "screen" | "agent",
+    name: string,
+    cleanupKey?: string,
+  ) => {
     if (!window.confirm(`Quit ${backend} session ${name}?`)) return;
     setSessionAuditLoading(true);
     setSessionAuditError("");
     try {
-      setSessionAudit(await api.cleanupSession(backend, name));
+      setSessionAudit(await api.cleanupSession(backend, name, cleanupKey));
     } catch (error) {
       setSessionAuditError(error instanceof Error ? error.message : "Session cleanup failed");
     } finally {
@@ -331,10 +335,10 @@ export function SettingsModal({
               </button>
               {sessionAudit ? (
                 <span>
-                  {sessionAudit.summary.orphanCount} orphan / {sessionAudit.summary.duplicateCount} duplicate / {sessionAudit.summary.missingCount} missing
+                  {sessionAudit.summary.orphanCount} orphan / {sessionAudit.summary.duplicateCount} duplicate / {sessionAudit.summary.missingCount} missing / {sessionAudit.summary.unreachableCount ?? 0} unreachable
                 </span>
               ) : (
-                <span>Read-only local tmux/screen check</span>
+                <span>Read-only local and registered-host durable-session check</span>
               )}
             </div>
             {sessionAuditError ? <div className="settings-error">{sessionAuditError}</div> : null}
@@ -344,18 +348,23 @@ export function SettingsModal({
                   {sessionAudit.summary.activePaneCount} panes, {sessionAudit.summary.sessionCount} sessions
                 </div>
                 {sessionAudit.sessions.map((row) => (
-                  <div key={`${row.backend}:${row.name}`} className={`session-audit-row ${row.status}`}>
+                  <div
+                    key={`${row.backend}:${row.name}:${row.cleanupKey ?? "local"}`}
+                    className={`session-audit-row ${row.status}`}
+                  >
                     <span>{row.status}</span>
                     <span>{row.backend}</span>
                     <span title={row.name}>{row.name}</span>
-                    <span>{row.detail}</span>
+                    <span title={row.endpoint ? `${row.endpoint}: ${row.detail}` : row.detail}>
+                      {row.endpoint ? `${row.endpoint}: ${row.detail}` : row.detail}
+                    </span>
                     <span>
                       {row.cleanupAllowed ? (
                         <button
                           type="button"
                           title={`Quit ${row.backend} session`}
                           disabled={sessionAuditLoading}
-                          onClick={() => void cleanupSession(row.backend, row.name)}
+                          onClick={() => void cleanupSession(row.backend, row.name, row.cleanupKey)}
                         >
                           <Trash2 size={13} />
                         </button>

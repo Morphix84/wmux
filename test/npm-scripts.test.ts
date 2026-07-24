@@ -37,3 +37,9 @@ test("the npm screenshot lifecycle enables documentation capture", () => {
   assert.match(source, /process\.env\.WMUX_CAPTURE_DOCS === "1"/);
   assert.match(source, /process\.env\.npm_lifecycle_event === "docs:screenshots"/);
 });
+
+test("the Playwright runtime protects server-only endpoint credentials", () => {
+  const source = fs.readFileSync(path.join(repoRoot, "playwright.config.ts"), "utf8");
+
+  assert.match(source, /fs\.chmodSync\(runtimeDir, 0o700\)/);
+});

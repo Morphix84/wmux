@@ -64,17 +64,89 @@ export const shouldUsePosixAgent = (machine: MachineConfig): boolean =>
 export const shouldUseSessionAgent = (machine: MachineConfig): boolean =>
   shouldUseWindowsAgent(machine) || shouldUsePosixAgent(machine);
 
-export const deleteWindowsAgentSession = (machine: MachineConfig, paneId: string): void => {
+export const deleteWindowsAgentSession = async (
+  machine: MachineConfig,
+  paneId: string,
+): Promise<boolean> => {
   const url = windowsAgentUrl(machine);
-  if (!url) return;
-  void requestJson(
-    "DELETE",
-    `${url}${WINDOWS_AGENT_PATHS.session(paneId)}`,
-    undefined,
-    5000,
-    authHeaders(machine),
-  )
-    .catch((error) => console.warn(`wmux: Windows agent delete failed for ${paneId}: ${formatError(error)}`));
+  if (!url) return false;
+  try {
+    await requestJson(
+      "DELETE",
+      `${url}${WINDOWS_AGENT_PATHS.session(paneId)}`,
+      undefined,
+      5000,
+      authHeaders(machine),
+    );
+    return true;
+  } catch (error) {
+    console.warn(`wmux: Windows agent delete failed for ${paneId}: ${formatError(error)}`);
+    return false;
+  }
+};
+
+export interface SessionAgentObservation {
+  paneId: string;
+  detail: string;
+}
+
+export interface SessionAgentObservationResult {
+  reachable: boolean;
+  detail?: string;
+  sessions: SessionAgentObservation[];
+}
+
+export const listSessionAgentSessions = async (
+  machine: MachineConfig,
+): Promise<SessionAgentObservationResult> => {
+  const url = windowsAgentUrl(machine);
+  if (!url) {
+    return {
+      reachable: false,
+      detail: "missing session agent URL",
+      sessions: [],
+    };
+  }
+  try {
+    const response = await requestJson<AgentSessionListResponse>(
+      "GET",
+      `${url}${WINDOWS_AGENT_PATHS.sessions}`,
+      undefined,
+      5000,
+      authHeaders(machine),
+    );
+    return {
+      reachable: true,
+      sessions: (response.sessions ?? []).flatMap((session) => {
+        if (
+          typeof session.id !== "string"
+          || !session.id
+          || session.id.length > 120
+          || !/^[A-Za-z0-9_-]+$/.test(session.id)
+        ) {
+          return [];
+        }
+        const status = typeof session.status === "string"
+          ? session.status.replace(/[\x00-\x1f\x7f]/g, "").slice(0, 80)
+          : "unknown";
+        const pid = typeof session.pid === "number"
+          && Number.isSafeInteger(session.pid)
+          && session.pid > 0
+          ? session.pid
+          : undefined;
+        return [{
+          paneId: session.id,
+          detail: `${status || "unknown"}${pid ? `, pid ${pid}` : ""}`,
+        }];
+      }),
+    };
+  } catch (error) {
+    return {
+      reachable: false,
+      detail: error instanceof Error ? error.message : String(error),
+      sessions: [],
+    };
+  }
 };
 
 export class WindowsAgentPasteImageUnsupportedError extends Error {}
@@ -235,6 +307,7 @@ export class WindowsAgentSession extends EventEmitter<AgentEvents> {
   private agentUrl: string | undefined;
   private liveResetEmitted = false;
   private liveOutputObserved = false;
+  private disposal: Promise<boolean> | undefined;
   readonly attachReady: Promise<void>;
   private resolveAttachReady!: () => void;
 
@@ -328,17 +401,26 @@ export class WindowsAgentSession extends EventEmitter<AgentEvents> {
   }
 
   kill(): void {
-    if (this.stopped) return;
+    void this.disposeRemote();
+  }
+
+  disposeRemote(): Promise<boolean> {
+    if (this.disposal) return this.disposal;
     this.stopped = true;
     this.checkpoint.dispose();
     this.resolveAttachReady();
-    void this.delete(WINDOWS_AGENT_PATHS.session(this.pane.id))
-      .catch((error) => this.reportTransportFailure("delete", error, false))
+    this.disposal = this.delete(WINDOWS_AGENT_PATHS.session(this.pane.id))
+      .then(() => true)
+      .catch((error) => {
+        this.reportTransportFailure("delete", error, false);
+        return false;
+      })
       .finally(() => {
         if (this.exited) return;
         this.exited = true;
         this.emit("exit", this.exitCode);
       });
+    return this.disposal;
   }
 
   detach(): void {

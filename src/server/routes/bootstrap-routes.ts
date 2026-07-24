@@ -72,19 +72,21 @@ export const bootstrapRoutes: readonly ApiRoute[] = [
   {
     id: "session-cleanup",
     method: "DELETE",
-    pattern: /^\/api\/session-audit\/(tmux|screen)\/([^/]+)$/,
+    pattern: /^\/api\/session-audit\/(tmux|screen|agent)\/([^/]+)$/,
     policy: routePolicy(
       "session-cleanup",
       "DELETE",
-      /^\/api\/session-audit\/(tmux|screen)\/[^/]+$/,
+      /^\/api\/session-audit\/(tmux|screen|agent)\/[^/]+$/,
     ),
-    handler: async ({ match, sendJson }) => {
+    handler: async ({ match, sendJson, url }) => {
       if (!match) throw new Error("session cleanup route matched without captures");
       sendJson(
         200,
         await cleanupDurableSession(
-          match[1] as "tmux" | "screen",
+          match[1] as "tmux" | "screen" | "agent",
           decodeURIComponent(match[2]),
+          undefined,
+          url.searchParams.get("endpoint") ?? undefined,
         ),
       );
     },

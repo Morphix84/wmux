@@ -68,7 +68,7 @@ export interface SessionBackend {
   checkpoint(session: BackendSession): AttachReplay | undefined;
   stageFile(paneId: string, data: Buffer, metadata: StageFileMetadata): Promise<StagedPasteImage>;
   detach(session: BackendSession): void;
-  dispose(paneId: string, session?: BackendSession, options?: { kill?: boolean }): Promise<void>;
+  dispose(paneId: string, session?: BackendSession, options?: { kill?: boolean }): Promise<boolean>;
   readCwd(paneId: string): Promise<string | undefined>;
   refreshClient(paneId: string): Promise<boolean>;
 }

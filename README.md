@@ -45,11 +45,11 @@ The desktop view and both mobile surfaces show the same live Codex workspace.
 | HTTP transport | Declarative route table with stable route ids, exact method/path matching, body limits, authorization policy, request dispatch, static delivery, event publication, and WebSocket upgrades |
 | Node.js service | Private-network boundary, bearer authentication, bounded REST uploads, event WebSocket, and canonical workspace state |
 | Agent sessions | `AgentSessionService` owns persisted delegation transitions and side effects; the versioned timeline store retains prompts, outcomes, touched files, and archived working-tree snapshots; Codex, Claude, and OpenCode adapters own runtime-specific TUI and optional headless behavior |
-| Session manager | One live client per pane, pinned backend snapshots, temporary image staging, bounded replay, VT checkpoints, resize ownership, and dispatch through the shared `SessionBackend` contract |
+| Session manager | One live client per pane, persisted registered-host disposal snapshots, temporary image staging, bounded replay, VT checkpoints, resize ownership, and dispatch through the shared `SessionBackend` contract |
 | Machine catalog | Merges static `wmux.config.json` machines with dynamically registered heartbeat hosts |
 | Execution backends | Raw PTY, durable `tmux`/`screen`, and native session-agent adapters; POSIX and Windows agents own pane processes, replay, and dynamic-registration heartbeat |
 | Shared contracts | TypeScript browser/server protocol plus generated Python delegation and Windows-agent constants checked by `npm run check:contracts` |
-| Persistent state | Workspace layout, delegation outcomes, settings, persistent mobile attachments, and metadata under `~/.wmux`; expiring paste-image stages are not workspace state |
+| Persistent state | Workspace layout, delegation outcomes, registered-host disposal endpoints, settings, persistent mobile attachments, and metadata under `~/.wmux`; expiring paste-image stages are not workspace state |
 | Optional streaming | Machine-local MediaMTX capture or a Moonlight/Sunshine gateway, requested by the browser |
 
 The server owns canonical workspace state and one live session client per
@@ -819,6 +819,9 @@ Set `WMUX_AGENT_TIMELINE_PATH` to override that location.
 Working-tree snapshots linked from a timeline are archived as owner-only versioned files under `~/.wmux/repository-snapshots/`.
 Each pane's current VT screen is stored under `~/.wmux/pane-checkpoints/` as a bounded, versioned, owner-only ANSI checkpoint with an atomic rolling backup.
 Set `WMUX_TERMINAL_CHECKPOINT_DIR` to override that directory.
+Registered panes persist their server-only disposal endpoints in `~/.wmux/session-endpoints.json` with the same schema-versioned, atomic, owner-only, rolling-backup discipline.
+Set `WMUX_SESSION_ENDPOINT_PATH` to override that location.
+The ledger can retain multiple endpoints for one pane when a dynamic machine ID is reassigned, and it is never included in browser bootstrap state.
 
 | Backend | Survives browser refresh | Survives wmux restart |
 | --- | --- | --- |
@@ -834,16 +837,17 @@ This restores screen state only.
 Raw PTY and legacy PowerShell processes remain non-durable, scrollback transcripts remain intentionally unpersisted, and durable multiplexers still redraw from their live session after wmux reattaches.
 Native session agents record byte-exact resize boundaries so live replay can replace the restored shield at the correct dimensions.
 
-Explicitly closing a pane, tab, or workspace kills its backing session. Audit
-local wmux-owned multiplexer sessions with:
+Explicitly closing a pane, tab, or workspace kills its backing session.
+Audit local multiplexer sessions plus registered-host multiplexer and native-agent sessions with:
 
 ```bash
 npm run audit:sessions
 npm run audit:sessions -- --json
 ```
 
-The Settings audit can remove confirmed duplicate or orphan wmux sessions but
-never active or non-wmux sessions.
+The Settings audit identifies each registered endpoint and reports unreachable hosts separately.
+It can remove confirmed duplicate or orphan wmux sessions but never active or non-wmux sessions.
+Remote cleanup uses the persisted server-only endpoint snapshot, so dynamic ID reassignment cannot redirect cleanup to the replacement host.
 
 ## Screen Streaming
 

@@ -71,6 +71,9 @@ Keep websocket, media, clipboard, hook, and run endpoints behind the same networ
 ## Architecture Notes
 
 - Server state lives in `~/.wmux/state.json` unless `WMUX_STATE_PATH` is set.
+- Registered-pane disposal endpoints live in the server-only `~/.wmux/session-endpoints.json` ledger unless `WMUX_SESSION_ENDPOINT_PATH` is set.
+  The schema-versioned, owner-only atomic store retains old endpoint snapshots across dynamic ID reassignment so session audit and explicit cleanup cannot be redirected to the replacement host.
+  Never expose stored agent tokens or other disposal credentials through bootstrap, audit, helper, or browser payloads.
 - Durable agent turn history lives in `~/.wmux/agent-timelines.json` unless `WMUX_AGENT_TIMELINE_PATH` is set.
   It uses a separate schema-versioned, owner-only atomic store with a validated rolling backup.
   Repository snapshots linked from a timeline are immutable owner-only archives under the adjacent `repository-snapshots/` directory.
@@ -190,7 +193,6 @@ Keep websocket, media, clipboard, hook, and run endpoints behind the same networ
 ## Current Gaps To Preserve In Docs
 
 - Dynamically registered panes stage helper commands but intentionally receive no broad shared or helper token; API-posting helpers need a separately provisioned `WMUX_HELPER_TOKEN` and otherwise fail with `401`.
-- Dynamic live-pane endpoint snapshots are in-memory only; a wmux restart followed by dynamic ID reassignment can leave the old remote durable session requiring manual cleanup.
 - Native session agents are restart-durable only while the owning supervised process remains alive. Linux/macOS agents use a PTY, while Windows uses experimental ConPTY or normalized stdio. Unexpected or forced agent restarts still terminate owned pane processes.
 - Windows SSH PowerShell is validated on dogfood Windows hosts. The experimental Windows session agent prefers pywinpty-backed ConPTY, falls back to terminal-normalized stdio when pywinpty is unavailable, contains each pane in a kill-on-close Windows Job Object, supports staged-update draining, and records size-aware replay. Legacy agents require a best-effort 80x24 replay fallback after a wmux restart. Broad full-screen app validation and process preservation across unexpected/forced Windows-agent restarts are still pending.
 - Static machine management is available through the settings editor and persists to `~/.wmux/config.json` with atomic validation and owner-only permissions.

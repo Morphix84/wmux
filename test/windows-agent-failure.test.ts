@@ -4,6 +4,7 @@ import http from "node:http";
 import test from "node:test";
 import {
   buildWindowsAgentUpdateSshInvocation,
+  listSessionAgentSessions,
   parseWindowsAgentUpdateAcknowledgement,
   probeWindowsAgent,
   WindowsAgentSession,
@@ -107,6 +108,44 @@ test("Windows agent health probes fail within their timeout budget", async () =>
   assert.equal(result.reachable, false);
   assert.match(result.reason ?? "", /timed out/);
   assert.ok(Date.now() - startedAt < 1000);
+  server.close();
+  await once(server, "close");
+});
+
+test("session agent audit lists bounded valid pane identities only", async () => {
+  let authorization = "";
+  const server = http.createServer((request, response) => {
+    authorization = String(request.headers.authorization ?? "");
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({
+      sessions: [
+        { id: "pane_valid", status: "running", pid: 42 },
+        { id: "../invalid", status: "running", pid: 43 },
+        { id: "x".repeat(121), status: "running", pid: 44 },
+      ],
+    }));
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const result = await listSessionAgentSessions({
+    id: "agent",
+    name: "Agent",
+    kind: "ssh",
+    host: "127.0.0.1",
+    sessionBackend: "agent",
+    agentUrl: `http://127.0.0.1:${address.port}`,
+    agentToken: "server-secret",
+  });
+  assert.deepEqual(result, {
+    reachable: true,
+    sessions: [{
+      paneId: "pane_valid",
+      detail: "running, pid 42",
+    }],
+  });
+  assert.equal(authorization, "Bearer server-secret");
   server.close();
   await once(server, "close");
 });

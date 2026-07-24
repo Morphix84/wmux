@@ -44,12 +44,16 @@ interface OpenTuiSettingsModalProps {
   onManageMachines: () => void;
   onUseDomFallback?: () => void;
   onRunSessionAudit: () => void | Promise<void>;
-  onCleanupSession: (backend: "tmux" | "screen", name: string) => void | Promise<void>;
+  onCleanupSession: (
+    backend: "tmux" | "screen" | "agent",
+    name: string,
+    cleanupKey?: string,
+  ) => void | Promise<void>;
 }
 
 type FieldId = "font" | "scrollback" | `alias:${string}`;
 type ChoiceId = "scheme" | "inactive-streaming" | "frame-rate" | "terminal-scroll";
-type FocusId = FieldId | ChoiceId | "manage" | "dom" | "close" | "audit" | "reset" | "cancel" | "save" | `cleanup:${string}:${string}`;
+type FocusId = FieldId | ChoiceId | "manage" | "dom" | "close" | "audit" | "reset" | "cancel" | "save" | `cleanup:${string}`;
 
 interface EditState {
   id: FieldId;
@@ -115,7 +119,7 @@ interface LayoutMessage {
 interface LayoutAuditRow {
   kind: "audit-row";
   id?: FocusId;
-  backend?: "tmux" | "screen";
+  backend?: "tmux" | "screen" | "agent";
   name?: string;
   status: string;
   meta: string;
@@ -346,8 +350,12 @@ export function OpenTuiSettingsModal({
     if (id === "terminal-scroll") { adjustTerminalScroll(); return; }
     if (id.startsWith("cleanup:")) {
       commitEditing();
-      const [, backend, ...nameParts] = id.split(":");
-      if (backend === "tmux" || backend === "screen") await onCleanupSession(backend, nameParts.join(":"));
+      const [backend, name, cleanupKey] = JSON.parse(
+        decodeURIComponent(id.slice("cleanup:".length)),
+      ) as ["tmux" | "screen" | "agent", string, string | null];
+      if (backend === "tmux" || backend === "screen" || backend === "agent") {
+        await onCleanupSession(backend, name, cleanupKey ?? undefined);
+      }
       return;
     }
     if (isFieldId(id)) startEditing(id);
@@ -597,10 +605,10 @@ const buildLayout = (
     kind: "audit",
     id: "audit",
     summary: sessionAuditLoading
-      ? "running local tmux/screen audit"
+      ? "running local and registered-host durable-session audit"
       : sessionAudit
-        ? `${sessionAudit.summary.orphanCount} orphan / ${sessionAudit.summary.duplicateCount} duplicate / ${sessionAudit.summary.missingCount} missing`
-        : "read-only local tmux/screen check",
+        ? `${sessionAudit.summary.orphanCount} orphan / ${sessionAudit.summary.duplicateCount} duplicate / ${sessionAudit.summary.missingCount} missing / ${sessionAudit.summary.unreachableCount ?? 0} unreachable`
+        : "read-only local and registered-host durable-session check",
     height: 3,
   });
   if (sessionAuditError) push({ kind: "message", text: sessionAuditError, tone: "error", height: 2 });
@@ -612,7 +620,13 @@ const buildLayout = (
       height: 2,
     });
     for (const session of sessionAudit.sessions) {
-      const id = session.cleanupAllowed ? (`cleanup:${session.backend}:${session.name}` as const) : undefined;
+      const id = session.cleanupAllowed
+        ? (`cleanup:${encodeURIComponent(JSON.stringify([
+          session.backend,
+          session.name,
+          session.cleanupKey ?? null,
+        ]))}` as const)
+        : undefined;
       push({
         kind: "audit-row",
         id,
@@ -620,7 +634,7 @@ const buildLayout = (
         name: session.name,
         status: session.status,
         meta: `${session.backend} ${session.name}`,
-        detail: session.detail,
+        detail: session.endpoint ? `${session.endpoint}: ${session.detail}` : session.detail,
         height: 2,
       });
     }

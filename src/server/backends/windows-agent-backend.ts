@@ -81,12 +81,16 @@ export class WindowsAgentBackend implements SessionBackend {
     paneId: string,
     session?: BackendSession,
     options: { kill?: boolean } = {},
-  ): Promise<void> {
+  ): Promise<boolean> {
     if (session && options.kill !== false) {
+      if (session instanceof WindowsAgentSession) return session.disposeRemote();
       session.kill();
-      return;
+      return deleteWindowsAgentSession(this.machine, paneId);
     }
-    if (!session) deleteWindowsAgentSession(this.machine, paneId);
+    if (!session && options.kill !== false) {
+      return deleteWindowsAgentSession(this.machine, paneId);
+    }
+    return true;
   }
 
   async readCwd(): Promise<string | undefined> {

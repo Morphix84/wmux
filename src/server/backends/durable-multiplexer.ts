@@ -49,9 +49,13 @@ export class DurableMultiplexerBackend extends RawPtyBackend {
     paneId: string,
     session?: BackendSession,
     options: { kill?: boolean } = {},
-  ): Promise<void> {
-    if (options.kill !== false) session?.kill();
-    await disposeDurableSession(this.machine, paneId);
+  ): Promise<boolean> {
+    if (options.kill === false) {
+      if (session) this.detach(session);
+      return true;
+    }
+    session?.kill();
+    return disposeDurableSession(this.machine, paneId);
   }
 
   override readCwd(paneId: string): Promise<string | undefined> {

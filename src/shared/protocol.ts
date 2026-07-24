@@ -490,14 +490,19 @@ export interface EventStateDelta {
 }
 
 export interface DurableSessionAuditRow {
-  backend: "tmux" | "screen";
+  backend: "tmux" | "screen" | "agent";
   name: string;
   paneId: string;
   attached: boolean;
   detail: string;
   activePane: boolean;
-  status: "active" | "duplicate" | "orphan";
+  status: "active" | "duplicate" | "orphan" | "unreachable";
   cleanupAllowed: boolean;
+  remote?: boolean;
+  machineId?: string;
+  machineName?: string;
+  endpoint?: string;
+  cleanupKey?: string;
 }
 
 export interface DurableSessionMissingRow {
@@ -513,6 +518,7 @@ export interface DurableSessionAudit {
     orphanCount: number;
     duplicateCount: number;
     missingCount: number;
+    unreachableCount?: number;
   };
   sessions: DurableSessionAuditRow[];
   missing: DurableSessionMissingRow[];
