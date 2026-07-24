@@ -51,11 +51,6 @@ test("workspace tooltips expose the active pane session identifier", async ({ pa
   if (!pane) throw new Error("active session is unavailable");
 
   try {
-    await page.goto("/?legacy=1");
-    await expect(page.locator("main.app-shell")).toBeVisible({ timeout: 20_000 });
-    const workspaceRow = page.locator(`a.workspace-item[href^="/workspaces/${workspace.id}/"]`);
-    await expect(workspaceRow).toHaveAttribute("title", new RegExp(`Session ${pane.id}`));
-
     await page.goto("/");
     await expect(page.locator("main.app-shell")).toBeVisible({ timeout: 20_000 });
     const canvas = page.locator(".open-tui-sidebar canvas");

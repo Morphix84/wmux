@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { Activity, Bell, BellRing, CheckCheck, ChevronDown, ChevronRight, CirclePlus, Command as CommandIcon, GripVertical, Link2, LoaderCircle, MessageSquare, MoreHorizontal, PanelLeft, PanelLeftClose, PanelLeftOpen, Plus, ScreenShare, Server, Settings, TerminalSquare, X } from "lucide-react";
+import { Bell, ChevronDown, ChevronRight, CirclePlus, GripVertical, LoaderCircle, MoreHorizontal, PanelLeft, PanelLeftClose, PanelLeftOpen, Plus, Server, TerminalSquare, X } from "lucide-react";
 import { api, modalSettingsUpdate, UnauthorizedError, WorkspaceReorderConflictError } from "./api";
 import { DiagnosticsModal } from "./DiagnosticsModal";
 import { ActivityPanel, buildActivityItems } from "./ActivityPanel";
@@ -116,10 +116,15 @@ interface WorkspaceDropPreview {
 }
 
 export function AppShell() {
-  const openTuiMode = useMemo(() => new URLSearchParams(window.location.search).get("legacy") !== "1", []);
   const mobileViewport = useMobileViewportState();
   const store = useAppStore();
   const state = useAppState();
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has("legacy")) return;
+    url.searchParams.delete("legacy");
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  }, []);
   const [newMachineId, setNewMachineId] = useState(() => loadMachineTargetId(window.localStorage));
   const [bootComplete, setBootComplete] = useState(false);
   const { toasts, pushToast, dismissToast } = useToasts();
@@ -541,9 +546,8 @@ export function AppShell() {
     });
   }, []);
 
-  const { refresh, activateWorkspaceTab, activatePane, chromePath } = useAppRouting({
+  const { refresh, activateWorkspaceTab, activatePane } = useAppRouting({
     store,
-    openTuiMode,
     activeWorkspace,
     activeTab,
     onError: (message) => pushToast(`Sync failed: ${message}`),
@@ -620,9 +624,9 @@ export function AppShell() {
   };
 
   const openSettings = useCallback(() => {
-    setSettingsSurface(openTuiMode && !mobileViewport.isMobile ? "opentui" : "dom");
+    setSettingsSurface(mobileViewport.isMobile ? "dom" : "opentui");
     setSettingsOpen(true);
-  }, [mobileViewport.isMobile, openTuiMode]);
+  }, [mobileViewport.isMobile]);
 
   const cancelSettings = () => {
     setPreviewSettings(null);
@@ -634,15 +638,6 @@ export function AppShell() {
     setSettingsOpen(false);
     setMachineManagerOpen(true);
   }, []);
-
-  const switchChromeMode = (enabled: boolean) => {
-    const params = new URLSearchParams(window.location.search);
-    params.delete("opentui");
-    if (enabled) params.delete("legacy");
-    else params.set("legacy", "1");
-    const query = params.toString();
-    window.location.assign(`${window.location.pathname}${query ? `?${query}` : ""}`);
-  };
 
   const targetMachineId = resolveMachineTargetId(newMachineId, displayMachines);
   const selectedMachine = displayMachines.find((machine) => machine.id === targetMachineId);
@@ -847,7 +842,7 @@ export function AppShell() {
 
   const copyActiveLink = async () => {
     if (!activeWorkspace || !activeTab) return;
-    const url = new URL(chromePath(workspaceTabPath(activeWorkspace.id, activeTab.id)), window.location.origin);
+    const url = new URL(workspaceTabPath(activeWorkspace.id, activeTab.id), window.location.origin);
     await writeBrowserClipboard(url.toString());
   };
 
@@ -1151,14 +1146,6 @@ export function AppShell() {
         keywords: ["screen", "display", "webrtc", "pixels", "moonlight", "sunshine"],
       },
       {
-        id: "switch-chrome-mode",
-        title: openTuiMode ? "Use legacy browser chrome" : "Use canvas chrome",
-        subtitle: openTuiMode ? "Reload with the original React controls" : "Reload with the canvas-grid interface",
-        section: "View",
-        run: () => switchChromeMode(!openTuiMode),
-        keywords: ["canvas", "grid", "chrome", "ui", "legacy"],
-      },
-      {
         id: "copy-link",
         title: "Copy active session link",
         subtitle: activeWorkspace && activeTab ? `${activeWorkspace.name} / ${activeTab.title}` : undefined,
@@ -1374,7 +1361,6 @@ export function AppShell() {
     displayMachines,
     machines,
     targetMachineId,
-    openTuiMode,
     openSettings,
     openMachineManager,
     openDiagnostics,
@@ -1418,7 +1404,7 @@ export function AppShell() {
   const appClassName = [
     "app-shell",
     sidebarCollapsed ? "sidebar-collapsed" : "",
-    openTuiMode ? "open-tui-mode" : "",
+    "open-tui-mode",
     mobileViewport.isMobile ? "mobile-viewport" : "",
     mobileViewport.keyboardOpen ? "mobile-keyboard-open" : "",
   ]
@@ -1436,7 +1422,7 @@ export function AppShell() {
           {pendingActions.length > 1 ? <span className="mutation-status-count">+{pendingActions.length - 1}</span> : null}
         </div>
       ) : null}
-      {openTuiMode && !mobileViewport.isMobile ? (
+      {!mobileViewport.isMobile ? (
         <OpenTuiSidebar
           targetMachineId={targetMachineId}
           targetMachineName={selectedMachine ? versionedMachineName(selectedMachine) : targetMachineId}
@@ -1457,7 +1443,7 @@ export function AppShell() {
       <aside
         ref={mobileSidebarRef}
         id="wmux-sidebar"
-        className={`sidebar ${openTuiMode ? "mobile-open-tui-sidebar" : ""}`}
+        className="sidebar mobile-open-tui-sidebar"
         aria-label="Workspace navigation"
         aria-hidden={mobileViewport.isMobile && sidebarCollapsed}
       >
@@ -1848,8 +1834,8 @@ export function AppShell() {
           ) : null}
         </>
       ) : null}
-      <section className={`workspace ${showMobileModeBar ? "mobile-workspace" : ""} ${showMobileAgentSurface ? "mobile-agent-active" : ""} ${showMobileModeBar && openTuiMode ? "mobile-open-tui" : ""}`}>
-        {showMobileModeBar && openTuiMode ? (
+      <section className={`workspace ${showMobileModeBar ? "mobile-workspace mobile-open-tui" : ""} ${showMobileAgentSurface ? "mobile-agent-active" : ""}`}>
+        {showMobileModeBar ? (
           <OpenTuiMobileChrome
             workspaceName={activeWorkspace?.name ?? "wmux"}
             subtitle={mobileHeaderSubtitle}
@@ -1867,90 +1853,7 @@ export function AppShell() {
             onOpenActions={openCommandPalette}
           />
         ) : null}
-        {showMobileModeBar && !openTuiMode ? (
-          <header className="mobile-shell-header">
-            <button
-              type="button"
-              className="mobile-header-nav"
-              title={sidebarCollapsed ? "Show navigation" : "Hide navigation"}
-              aria-label={sidebarCollapsed ? "Show navigation" : "Hide navigation"}
-              aria-expanded={!sidebarCollapsed}
-              aria-controls="wmux-sidebar"
-              onClick={toggleSidebar}
-            >
-              <PanelLeft size={20} />
-            </button>
-            <div className="mobile-header-identity">
-              <strong>{activeWorkspace?.name ?? "wmux"}</strong>
-              <span>
-                <span className={`mobile-header-status ${mobileHeaderStatus}`} aria-hidden="true" />
-                <span className={`mobile-header-status-label ${mobileHeaderStatus}`}>{mobileHeaderStatusLabel}</span>
-                {mobileHeaderVersion?.status === "outdated" ? (
-                  <span
-                    className={`workspace-version-badge mobile ${mobileHeaderVersion.status}`}
-                    title={mobileHeaderVersion.detail}
-                    aria-label={mobileHeaderVersion.detail}
-                    data-version-status={mobileHeaderVersion.status}
-                  >
-                    {mobileHeaderVersion.label}
-                  </span>
-                ) : null}
-                {mobileHeaderSubtitle ? <span className="mobile-header-divider">|</span> : null}
-                {mobileHeaderSubtitle ? <span>{mobileHeaderSubtitle}</span> : null}
-              </span>
-            </div>
-            <div className="mobile-header-actions">
-              <button type="button" title="Open actions" aria-label="Open actions" onClick={openCommandPalette}>
-                <CommandIcon size={17} />
-              </button>
-            </div>
-          </header>
-        ) : null}
-        {showMobileModeBar && !openTuiMode ? (
-          <div className="mobile-mode-bar">
-            <button
-              type="button"
-              className="mobile-mode-navigation"
-              title="Workspaces and hosts"
-              aria-label="Open workspaces and hosts"
-              aria-expanded={!sidebarCollapsed}
-              aria-controls="wmux-sidebar"
-              onClick={toggleSidebar}
-            >
-              <PanelLeft size={17} />
-              <span>Workspaces</span>
-            </button>
-            <div className="mobile-mode-tabs" role="tablist" aria-label="Mobile surface">
-              <button
-                type="button"
-                aria-label="Open agent fleet"
-                onClick={() => setAgentFleetOpen(true)}
-              >
-                <Activity size={15} />
-                <span>Fleet</span>
-              </button>
-              <button
-                type="button"
-                className={mobileSurfaceMode === "agent" ? "active" : ""}
-                aria-selected={mobileSurfaceMode === "agent"}
-                onClick={() => setMobileSurfaceMode("agent")}
-              >
-                <MessageSquare size={15} />
-                <span>Chat</span>
-              </button>
-              <button
-                type="button"
-                className={mobileSurfaceMode === "terminal" ? "active" : ""}
-                aria-selected={mobileSurfaceMode === "terminal"}
-                onClick={() => setMobileSurfaceMode("terminal")}
-              >
-                <TerminalSquare size={15} />
-                <span>Term</span>
-              </button>
-            </div>
-          </div>
-        ) : null}
-        {!showMobileModeBar && (openTuiMode ? (
+        {!showMobileModeBar ? (
           <OpenTuiTopbar
             tabs={
               activeWorkspace?.tabs.map((tab) => ({
@@ -1981,88 +1884,7 @@ export function AppShell() {
             onEnableNotifications={enableBrowserNotifications}
             onMarkRead={markWorkspaceRead}
           />
-        ) : (
-        <header className="topbar">
-          <div className="tabs">
-            {activeWorkspace
-              ? activeWorkspace.tabs.map((tab) => (
-              <a
-                key={tab.id}
-                href={workspaceTabPath(activeWorkspace.id, tab.id)}
-                className={`tab ${tab.id === activeTab?.id ? "active" : ""} ${(unreadByTabId.get(tab.id) ?? 0) > 0 ? "unread" : ""}`}
-                onClick={(event) => activateWorkspaceLink(event, activeWorkspace.id, tab.id)}
-              >
-                <TerminalSquare size={15} />
-                <span>{tab.title}</span>
-                {(unreadByTabId.get(tab.id) ?? 0) > 0 ? <span className="badge">{unreadByTabId.get(tab.id)}</span> : null}
-              </a>
-                ))
-              : null}
-            <button
-              className="icon-button"
-              title={`${activeWorkspace ? "New tab" : "New workspace"} on ${selectedMachine?.name ?? targetMachineId}`}
-              disabled={!selectedMachine?.reachable}
-              onClick={() => (activeWorkspace ? createTab(targetMachineId) : createWorkspace(targetMachineId))}
-            >
-              <Plus size={16} />
-            </button>
-          </div>
-          <div className="machine-picker">
-            <div className={`service-status ${serviceConnection}`} title={`wmux service ${serviceConnection}`}>
-              <span className={`status-dot ${serviceConnection === "online" ? "on" : ""}`} />
-              <span>wmux {serviceConnection}</span>
-            </div>
-            <button
-              title="Open command palette"
-              onClick={openCommandPalette}
-            >
-              <CommandIcon size={16} />
-            </button>
-            <button
-              title="Settings"
-              onClick={openSettings}
-            >
-              <Settings size={16} />
-            </button>
-            <button
-              className={activityOpen ? "active-tool" : ""}
-              title="Activity"
-              onClick={() => setActivityOpen((value) => !value)}
-            >
-              <Activity size={16} />
-            </button>
-            <button
-              className={`desktop-stream-button ${activeStream?.live ? "active-tool" : ""}`}
-              title={`${activeStreamMachine?.name ?? activeStreamMachineId} screen stream`}
-              disabled={!canOpenStream}
-              onClick={() => setStreamOpen(true)}
-            >
-              <ScreenShare size={16} />
-            </button>
-            <button
-              title="Copy active session link"
-              disabled={!activeWorkspace || !activeTab}
-              onClick={copyActiveLink}
-            >
-              <Link2 size={16} />
-            </button>
-            <button
-              title="Enable browser notifications"
-              disabled={!("Notification" in window) || Notification.permission !== "default"}
-              onClick={enableBrowserNotifications}
-            >
-              {unreadNotifications.length > 0 ? <BellRing size={16} /> : <Bell size={16} />}
-            </button>
-            <button
-              title="Mark workspace notifications read"
-              disabled={!activeWorkspace || (unreadByWorkspaceId.get(activeWorkspace.id) ?? 0) === 0}
-              onClick={markWorkspaceRead}
-            >
-              <CheckCheck size={16} />
-            </button>
-          </div>
-        </header>
-        ))}
+        ) : null}
         {showMobileAgentSurface ? (
           <MobileAgentSurface
             state={state}
@@ -2127,7 +1949,7 @@ export function AppShell() {
         )}
       </section>
       {activityOpen ? (
-        openTuiMode && !mobileViewport.isMobile ? (
+        !mobileViewport.isMobile ? (
           <OpenTuiActivityPanel
             rows={openTuiActivityRows}
             onClose={() => setActivityOpen(false)}
@@ -2180,13 +2002,13 @@ export function AppShell() {
           keybindings={keybindings}
           appleKeybindings={appleKeybindings}
           defaults={settingsDefaults}
-          surface={openTuiMode && !mobileViewport.isMobile ? settingsSurface : "dom"}
+          surface={!mobileViewport.isMobile ? settingsSurface : "dom"}
           onPreview={setPreviewSettings}
           onSave={updateSettings}
           onCancel={cancelSettings}
           onManageMachines={openMachineManager}
-          onUseDomFallback={openTuiMode && !mobileViewport.isMobile ? () => setSettingsSurface("dom") : undefined}
-          onUseOpenTui={openTuiMode && !mobileViewport.isMobile ? () => setSettingsSurface("opentui") : undefined}
+          onUseDomFallback={!mobileViewport.isMobile ? () => setSettingsSurface("dom") : undefined}
+          onUseOpenTui={!mobileViewport.isMobile ? () => setSettingsSurface("opentui") : undefined}
         />
       ) : null}
       {machineManagerOpen ? (
@@ -2196,7 +2018,7 @@ export function AppShell() {
         />
       ) : null}
       {commandPaletteOpen ? (
-        openTuiMode && !mobileViewport.isMobile ? (
+        !mobileViewport.isMobile ? (
           <OpenTuiCommandPalette
             commands={commands}
             query={commandPaletteQuery}

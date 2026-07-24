@@ -1,34 +1,5 @@
 import { expect, test } from "./fixtures";
 
-test("drags legacy workspace rows into a persisted order", async ({ page, request }, testInfo) => {
-  test.skip(testInfo.project.name !== "chromium", "desktop drag-and-drop coverage");
-  const firstResponse = await request.post("/api/workspaces", { data: { machineId: "local" } });
-  const secondResponse = await request.post("/api/workspaces", { data: { machineId: "local" } });
-  expect(firstResponse.ok()).toBeTruthy();
-  expect(secondResponse.ok()).toBeTruthy();
-  const first = (await firstResponse.json() as { workspace: { id: string } }).workspace;
-  const second = (await secondResponse.json() as { workspace: { id: string } }).workspace;
-
-  try {
-    await page.goto("/?legacy=1");
-    await expect(page.locator("main.app-shell")).toBeVisible({ timeout: 20_000 });
-    const source = page.locator(`a.workspace-item[href^="/workspaces/${second.id}/"]`);
-    const target = page.locator(`a.workspace-item[href^="/workspaces/${first.id}/"]`);
-    await expect(source).toBeVisible();
-    await expect(target).toBeVisible();
-    await source.dragTo(target, { targetPosition: { x: 30, y: 55 } });
-
-    await expect.poll(async () => {
-      const response = await request.get("/api/bootstrap");
-      const payload = await response.json() as { workspaces: Array<{ id: string }> };
-      return payload.workspaces.map((workspace) => workspace.id).slice(0, 2);
-    }).toEqual([first.id, second.id]);
-  } finally {
-    await request.delete(`/api/workspaces/${second.id}`);
-    await request.delete(`/api/workspaces/${first.id}`);
-  }
-});
-
 test("drags canvas workspace rows into a persisted order", async ({ page, request }, testInfo) => {
   test.skip(testInfo.project.name !== "chromium", "desktop canvas drag coverage");
   const firstResponse = await request.post("/api/workspaces", { data: { machineId: "local" } });

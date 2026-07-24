@@ -134,7 +134,7 @@ Keep websocket, media, clipboard, hook, and run endpoints behind the same networ
 ## UI And Interaction Notes
 
 - The terminal canvas/content area should remain visually untreated. Product styling belongs in surrounding chrome, overlays, sidebars, shelves, and toolbars.
-- The default chrome uses the wmux-owned Canvas 2D cell-grid renderer in `src/client/src/opentui-grid.ts`. `?legacy=1` keeps the older DOM-heavy React chrome available.
+- The application chrome uses the wmux-owned Canvas 2D cell-grid renderer in `src/client/src/opentui-grid.ts`. The former `?legacy=1` desktop React fallback has been retired. Keep editable controls, semantic accessibility overlays, mobile navigation, and browser-API surfaces DOM-backed where their interaction requires it.
 - Treat the console/TUI aesthetic as wmux's project-wide design language wherever the interaction permits it. Prefer monospaced cell rhythm, flat rectangular regions, one-pixel rules, compact uppercase labels, tabular values, explicit status tokens such as `[OK]`/`[WARN]`, and bracketed text actions such as `[R] REFRESH`. Avoid generic dashboard cards, pill-shaped controls, soft rounded surfaces, ornamental gradients, and icon-only actions unless the platform interaction or content materially benefits from them.
 - DOM surfaces that remain necessary for accessibility, editable controls, semantic links, or browser APIs should still visually align with the cell-grid chrome. Keep their hierarchy text-first and console-like, preserve visible keyboard/focus behavior, and use the shared terminal/chrome palette and `--wmux-mono-font` rather than introducing a separate application style.
 - Do not reintroduce the former unlicensed `opentui-browser` vendor snapshot. Keep the local renderer limited to the cell-grid surface wmux actually uses.
@@ -207,7 +207,7 @@ Keep websocket, media, clipboard, hook, and run endpoints behind the same networ
 - Kitty graphics support is partial. File/shared-memory transfer, animation frames, z-index layering, scrollback-persistent placement, Sixel, and iTerm2 image protocols are not complete.
 - Command run tracking is explicit through `wmux-run`; arbitrary shell command detection is not implemented.
 - Cwd preservation is best-effort outside tmux and wmux-managed shell bootstraps.
-- The canvas-grid and legacy DOM chrome paths coexist; avoid behavior drift between them while the fallback remains supported.
+- Canvas-grid chrome parity is tracked in [docs/CANVAS_CHROME_PARITY.md](docs/CANVAS_CHROME_PARITY.md). DOM remains only for interactions that require semantic or editable browser controls.
 - View-only pixel streaming uses native-agent-supervised MediaMTX capture, while the Moonlight gateway remains for Moonlight-native interaction. Wayland, locked or logged-out Windows capture, macOS permission automation, Sunshine app-launch automation, and broad full-screen Windows capture remain gaps.
 - Document newly discovered or intentionally deferred limitations in the relevant `README.md` section (or a `docs/` runbook) so they stay near the feature they qualify.
 
