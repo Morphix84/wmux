@@ -30,6 +30,7 @@ test("unsupported terminal image protocols show a visible diagnostic", async ({
     await diagnostic.getByRole("button", { name: "Dismiss graphics warning" }).click();
     await expect(diagnostic).toBeHidden();
 
+    await terminalInput.evaluate((element: HTMLTextAreaElement) => element.focus());
     await page.keyboard.type("printf '\\033]1337;File=name=test.png:aGVsbG8=\\a'");
     await page.keyboard.press("Enter");
     await expect(diagnostic).toContainText("[GRAPHICS WARN] ITERM2", { timeout: 15_000 });
