@@ -10,13 +10,13 @@ import {
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { Bell, ChevronDown, ChevronRight, CirclePlus, GripVertical, LoaderCircle, MoreHorizontal, PanelLeft, PanelLeftClose, PanelLeftOpen, Plus, Server, TerminalSquare, X } from "lucide-react";
+import { GripVertical, LoaderCircle, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
 import { api, modalSettingsUpdate, UnauthorizedError, WorkspaceReorderConflictError } from "./api";
 import { DiagnosticsModal } from "./DiagnosticsModal";
 import { ActivityPanel, buildActivityItems } from "./ActivityPanel";
 import { AgentFleet, type AgentFleetRow } from "./AgentFleet";
 import { CommandPalette, type PaletteCommand } from "./CommandPalette";
-import { SettingsModal, cleanAlias, defaultSettings, type SettingsSurface } from "./SettingsModal";
+import { SettingsModal, cleanAlias, defaultSettings } from "./SettingsModal";
 import { MachineManagerModal } from "./MachineManagerModal";
 import { ColorSchemeProvider } from "./color-scheme-context";
 import { colorSchemeById, colorSchemeCssVariables } from "./color-schemes";
@@ -33,7 +33,6 @@ import { OpenTuiActivityPanel } from "./OpenTuiActivityPanel";
 import { OpenTuiMobileChrome } from "./OpenTuiMobileChrome";
 import type { OpenTuiActivityRow } from "./OpenTuiActivityPanel";
 import { OpenTuiCommandPalette } from "./OpenTuiCommandPalette";
-import { OpenTuiSettingsModal } from "./OpenTuiSettingsModal";
 import { OpenTuiSidebar } from "./OpenTuiSidebar";
 import type { OpenTuiSidebarMachine, OpenTuiSidebarWorkspace } from "./OpenTuiSidebar";
 import { OpenTuiTopbar } from "./OpenTuiTopbar";
@@ -55,7 +54,6 @@ import { useMobileViewportState } from "./mobile-viewport";
 import { createMobileNavigationGesture } from "./mobile/navigation-gesture";
 import { loadMachineTargetId, persistMachineTargetId, resolveMachineTargetId } from "./machine-target";
 import { workspacePresentationDescriptor, workspacePresentationMachineId } from "./workspace-presentation";
-import { WorkspaceMoveDialog } from "./WorkspaceMoveDialog";
 import {
   contextMobileSurfaceMode,
   legacyMobileSurfaceModeStorageKey,
@@ -72,9 +70,7 @@ import {
   pruneCollapsedWorkspaceIds,
   rebaseCollapsedWorkspaceIds,
   sameWorkspaceIds,
-  workspacePointerMovePosition,
   type WorkspaceActivityAggregate,
-  type WorkspaceMoveIntent,
 } from "./workspace-tree";
 import { DEFAULT_TERMINAL_FONT_FAMILY } from "./types";
 import {
@@ -121,12 +117,6 @@ interface PendingAction {
   label: string;
 }
 
-interface WorkspaceDropPreview {
-  workspaceId: string;
-  targetWorkspaceId?: string;
-  position: WorkspaceReorderPosition;
-}
-
 export function AppShell() {
   const mobileViewport = useMobileViewportState();
   const store = useAppStore();
@@ -151,13 +141,9 @@ export function AppShell() {
   } = useSidebar(mobileViewport.isMobile);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [machineManagerOpen, setMachineManagerOpen] = useState(false);
-  const [settingsSurface, setSettingsSurface] = useState<SettingsSurface>("dom");
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [commandPaletteQuery, setCommandPaletteQuery] = useState("");
   const [previewSettings, setPreviewSettings] = useState<WmuxSettings | null>(null);
-  const [workspaceHostFilter, setWorkspaceHostFilter] = useState("all");
-  const [workspaceDropPreview, setWorkspaceDropPreview] = useState<WorkspaceDropPreview | null>(null);
-  const [moveWorkspace, setMoveWorkspace] = useState<{ workspaceId: string; returnFocus: HTMLElement | null } | null>(null);
   const [activityOpen, setActivityOpen] = useState(false);
   const [agentFleetOpen, setAgentFleetOpen] = useState(false);
   const [streamOpen, setStreamOpen] = useState(false);
@@ -172,7 +158,6 @@ export function AppShell() {
     loadLegacyMobileSurfaceMode(window.localStorage),
   );
   const [pendingMobileClose, setPendingMobileClose] = useState<MobileCloseRequest | null>(null);
-  const [mobileHostsExpanded, setMobileHostsExpanded] = useState(false);
   const [bellPaneIds, setBellPaneIds] = useState<Set<string>>(() => new Set());
   const [mountedTabKeys, setMountedTabKeys] = useState<string[]>([]);
   const [terminalFocusRequest, setTerminalFocusRequest] = useState<TerminalFocusRequest | null>(null);
@@ -187,8 +172,6 @@ export function AppShell() {
   const collapseWriteQueue = useRef<Promise<void>>(Promise.resolve());
   const collapseWriteVersion = useRef(0);
   const desiredCollapsedWorkspaceIds = useRef<string[] | null>(null);
-  const draggedWorkspaceId = useRef<string | null>(null);
-  const workspaceDropPreviewRef = useRef<WorkspaceDropPreview | null>(null);
   const terminalFocusToken = useRef(0);
   const mobileSidebarRef = useRef<HTMLElement | null>(null);
   const mobileSidebarCloseRef = useRef<HTMLButtonElement | null>(null);
@@ -377,7 +360,6 @@ export function AppShell() {
   const displayMachines = useMemo(() => machines.map((machine) => withMachineAlias(machine, settings)), [machines, settings]);
   const targetMachineId = resolveMachineTargetId(newMachineId, displayMachines);
   const selectedMachine = displayMachines.find((machine) => machine.id === targetMachineId);
-  const reachableMachineCount = displayMachines.filter((machine) => machine.reachable).length;
   const notifications = state?.notifications ?? [];
   const unreadNotifications = notifications.filter((notification) => !notification.read);
   const unreadByPaneId = useMemo(() => countUnreadBy(notifications, "paneId"), [notifications]);
@@ -463,13 +445,6 @@ export function AppShell() {
     }
     return activity;
   }, [bellByWorkspaceId, latestAgentByWorkspaceId, state?.workspaces, unreadByWorkspaceId]);
-  const workspaceTree = useMemo(() => deriveWorkspaceTree({
-    workspaces: state?.workspaces ?? [],
-    activeWorkspaceId: activeWorkspace?.id,
-    hostFilter: workspaceHostFilter,
-    collapsedWorkspaceIds: persistedSettings.collapsedWorkspaceIds,
-    activityByWorkspaceId: workspaceActivity,
-  }), [activeWorkspace?.id, persistedSettings.collapsedWorkspaceIds, state?.workspaces, workspaceActivity, workspaceHostFilter]);
   const openTuiWorkspaceTree = useMemo(() => deriveWorkspaceTree({
     workspaces: state?.workspaces ?? [],
     activeWorkspaceId: activeWorkspace?.id,
@@ -708,9 +683,8 @@ export function AppShell() {
   };
 
   const openSettings = useCallback(() => {
-    setSettingsSurface(mobileViewport.isMobile ? "dom" : "opentui");
     setSettingsOpen(true);
-  }, [mobileViewport.isMobile]);
+  }, []);
 
   const cancelSettings = () => {
     setPreviewSettings(null);
@@ -1008,7 +982,7 @@ export function AppShell() {
     async (workspaceId: string, targetWorkspaceId: string | undefined, position: WorkspaceReorderPosition) => {
       if (workspaceId === targetWorkspaceId) return;
       const current = store.get();
-      if (!current || workspaceTree.movesDisabled) return;
+      if (!current || openTuiWorkspaceTree.movesDisabled) return;
       try {
         const response = await api.reorderWorkspace(workspaceId, targetWorkspaceId, position, current.workspaceTreeRevision);
         await refresh(response.state);
@@ -1373,14 +1347,6 @@ export function AppShell() {
         keywords: [machine.id, machine.host ?? ""],
       },
       {
-        id: `filter-host:${machine.id}`,
-        title: `Filter workspaces: ${machine.name}`,
-        subtitle: "Show only workspaces with this host affinity",
-        section: "Hosts",
-        run: () => setWorkspaceHostFilter(machine.id),
-        keywords: [machine.id, machine.host ?? "", "filter"],
-      },
-      {
         id: `workspace-host:${machine.id}`,
         title: `New workspace on ${machine.name}`,
         subtitle: machine.reachable ? machine.kind : machine.reason ?? "Offline",
@@ -1390,15 +1356,6 @@ export function AppShell() {
         keywords: [machine.id, machine.host ?? ""],
       },
     ]);
-
-    hostCommands.unshift({
-      id: "filter-host:all",
-      title: "Filter workspaces: all hosts",
-      subtitle: "Show every workspace",
-      section: "Hosts",
-      run: () => setWorkspaceHostFilter("all"),
-      keywords: ["filter", "hosts", "all"],
-    });
 
     const workspaceCommands =
       state?.workspaces.flatMap((workspace): PaletteCommand[] => {
@@ -1528,349 +1485,104 @@ export function AppShell() {
           allWorkspaces={state.workspaces}
         />
       ) : (
-      <aside
-        ref={mobileSidebarRef}
-        id="wmux-sidebar"
-        className="sidebar mobile-open-tui-sidebar"
-        aria-label="Workspace navigation"
-        aria-hidden={mobileViewport.isMobile && sidebarCollapsed}
-      >
-        <div className="brand">
-          <PanelLeft size={18} />
-          <span>wmux</span>
-        </div>
-        <div className="target-host">
-          <div className="target-host-label">
-            <span>Target host</span>
-            <span className={`reach-dot ${selectedMachine?.reachable ? "on" : ""}`} />
-          </div>
-          <div className="new-session">
-            <select title="Target host for new workspaces and tabs" value={targetMachineId} onChange={(event) => setNewMachineId(event.target.value)}>
-            {displayMachines.map((machine) => (
-              <option key={machine.id} value={machine.id} disabled={!machine.reachable}>
-                {versionedMachineName(machine)}
-              </option>
-              ))}
-            </select>
-            <button
-              title={`New workspace on ${selectedMachine?.name ?? targetMachineId}`}
-              disabled={!selectedMachine?.reachable}
-              onClick={() => createWorkspace(targetMachineId)}
+        <OpenTuiSidebar
+          containerRef={mobileSidebarRef}
+          className="mobile-open-tui-sidebar"
+          ariaHidden={sidebarCollapsed}
+          targetMachineId={targetMachineId}
+          targetMachineName={selectedMachine ? versionedMachineName(selectedMachine) : targetMachineId}
+          targetMachineReachable={Boolean(selectedMachine?.reachable)}
+          workspaces={openTuiWorkspaces}
+          machines={openTuiMachines}
+          onTargetMachineChange={setNewMachineId}
+          onCreateWorkspace={() => createWorkspace(targetMachineId)}
+          onActivateWorkspace={activateWorkspaceFromChrome}
+          onReorderWorkspace={reorderWorkspace}
+          onToggleWorkspace={toggleWorkspaceCollapsed}
+          movesDisabled={openTuiWorkspaceTree.movesDisabled}
+          pointerReorderDisabled
+          workspaceActions
+          onRequestCloseWorkspace={requestCloseWorkspace}
+          allWorkspaces={state.workspaces}
+        >
+          {activeWorkspace ? (
+            <nav
+              className="mobile-session-navigation"
+              aria-label={`Sessions in ${activeWorkspace.name}`}
             >
-              <CirclePlus size={17} />
-            </button>
-          </div>
-        </div>
-        <div className="sidebar-label workspace-toolbar">
-          <span>Workspaces</span>
-          <select
-            title="Filter workspace list by host"
-            value={workspaceHostFilter}
-            onChange={(event) => setWorkspaceHostFilter(event.target.value)}
-          >
-            <option value="all">All hosts</option>
-            {displayMachines.map((machine) => (
-              <option key={machine.id} value={machine.id}>
-                {versionedMachineName(machine)}
-              </option>
-            ))}
-          </select>
-        </div>
-        <nav className="workspace-list" role="tree" aria-label="Workspace tree">
-            {workspaceTree.rows.length === 0 ? <div className="workspace-empty">No workspaces</div> : null}
-            {workspaceTree.rows.map((treeRow) => {
-              const workspace = treeRow.workspace;
-              const presentationMachineId = workspacePresentationMachineId(workspace);
-              const machine = machineFor(displayMachines, presentationMachineId);
-              const sourceMachine = machineFor(machines, presentationMachineId);
-              const affinityMachine = machineFor(machines, workspace.machineId);
-              const unreadCount = treeRow.ownActivity.unreadCount + treeRow.hiddenActivity.unreadCount;
-              const latestUnread = latestUnreadByWorkspaceId.get(workspace.id);
-              const latestAgent = latestAgentByWorkspaceId.get(workspace.id);
-              const latestAgentName = latestAgent ? workspaceAgentName(latestAgent) : undefined;
-              const latestAgentStatusLabel = latestAgent ? workspaceAgentStatusLabel(latestAgent) : undefined;
-              const tab = workspace.tabs.find((candidate) => candidate.id === workspace.activeTabId) ?? workspace.tabs[0];
-              if (!tab) return null;
-              const pane = tab.panes.find((candidate) => candidate.id === tab.activePaneId) ?? tab.panes[0];
-              const cwd = normalizeUserPath(pane?.cwd);
-              const cwdDisplay = cwd ? compactMiddlePath(cwd, 24) : undefined;
-              const descriptor = dedupeAgentDescriptor(
-                latestUnread?.body ||
-                  latestUnread?.subtitle ||
-                  workspaceAgentSummary(latestAgent) ||
-                  displayWorkspaceDescriptor(
-                    workspacePresentationDescriptor(workspace, machine?.name ?? presentationMachineId, affinityMachine?.name),
-                    machine,
-                    sourceMachine,
-                    presentationMachineId,
-                    workspace.machineId,
-                  ),
-                latestAgentStatusLabel,
-              );
-              const host = displayWorkspaceHost(machine, sourceMachine, presentationMachineId);
-              const hostContext = latestAgentName ? `${host} · ${latestAgentName}` : host;
-              const visibleDescriptor = compactWorkspaceDescription(descriptor, 72);
-              const tooltipDescriptor = compactWorkspaceDescription(descriptor, 200);
-              const version = summarizeWorkspaceVersion(workspace, displayMachines);
-              const showDescriptor = visibleDescriptor && visibleDescriptor !== host && visibleDescriptor !== hostContext;
-              const tooltip = [
-                workspace.name,
-                workspace.createdBy === "agent" ? "Agent-created" : "",
-                showDescriptor ? tooltipDescriptor : "",
-                hostContext,
-                version?.detail,
-                cwd,
-                formatSessionReference(pane?.id),
-              ].filter(Boolean).join(" / ");
-              const latestAgentStatus = latestAgent ? agentStatusClass(latestAgent.status) : "";
-              const hasBell = treeRow.ownActivity.bell || treeRow.hiddenActivity.bell;
-              const workspaceStateClass = latestAgentStatus || (machine?.reachable ? "reachable" : "offline");
-              const workspaceStateTitle = latestAgent
-                ? `${latestAgent.agent} ${latestAgent.status}`
-                : machine?.reachable
-                  ? "Host reachable"
-                  : "Host offline";
-              return (
-              <div
-                key={workspace.id}
-                className="workspace-tree-row"
-                role="none"
-                style={{ "--workspace-tree-depth": treeRow.depth } as CSSProperties}
-              >
-              {treeRow.hasChildren ? (
+              <div className="mobile-session-navigation-header">
+                <span>Sessions</span>
                 <button
                   type="button"
-                  className="workspace-disclosure"
-                  aria-label={`${treeRow.effectiveExpanded ? "Collapse" : "Expand"} ${workspace.name}`}
-                  onClick={() => toggleWorkspaceCollapsed(workspace.id)}
+                  title={`New tab on ${selectedMachine?.name ?? targetMachineId}`}
+                  aria-label={`New tab on ${selectedMachine?.name ?? targetMachineId}`}
+                  disabled={!selectedMachine?.reachable}
+                  onClick={() => createTab(targetMachineId)}
                 >
-                  {treeRow.effectiveExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                  [+]
                 </button>
-              ) : <span className="workspace-disclosure-spacer" aria-hidden="true" />}
-              <a
-                href={workspaceTabPath(workspace.id, tab.id)}
-                title={`${tooltip}${mobileViewport.isMobile || workspaceTree.movesDisabled ? "" : " / Drag to reorder"}`}
-                draggable={!mobileViewport.isMobile && !workspaceTree.movesDisabled}
-                role="treeitem"
-                aria-level={treeRow.depth + 1}
-                aria-expanded={treeRow.hasChildren ? treeRow.effectiveExpanded : undefined}
-                aria-current={workspace.id === activeWorkspace?.id ? "page" : undefined}
-                className={`workspace-item ${workspace.id === activeWorkspace?.id ? "active" : ""} ${
-                  machine?.reachable ? "" : "disabled"
-                } ${workspace.createdBy === "agent" ? "agent-created" : ""} ${
-                  latestAgentStatus ? `agent-${latestAgentStatus}` : ""
-                } ${workspaceDropPreview?.workspaceId === workspace.id ? "dragging" : ""} ${
-                  workspaceDropPreview?.targetWorkspaceId === workspace.id
-                    ? `drop-${workspaceDropPreview.position}`
-                    : ""
-                }`}
-                onClick={(event) => activateWorkspaceLink(event, workspace.id, tab.id, {
-                  focusTerminal: !mobileViewport.isMobile,
-                })}
-                onDragStart={(event) => {
-                  if (mobileViewport.isMobile || workspaceTree.movesDisabled) {
-                    event.preventDefault();
-                    return;
-                  }
-                  draggedWorkspaceId.current = workspace.id;
-                  workspaceDropPreviewRef.current = null;
-                  event.dataTransfer.effectAllowed = "move";
-                  event.dataTransfer.setData("text/plain", workspace.id);
-                  setWorkspaceDropPreview(null);
-                }}
-                onDragOver={(event) => {
-                  if (mobileViewport.isMobile || workspaceTree.movesDisabled) return;
-                  const sourceWorkspaceId = draggedWorkspaceId.current;
-                  if (!sourceWorkspaceId || sourceWorkspaceId === workspace.id) {
-                    workspaceDropPreviewRef.current = null;
-                    setWorkspaceDropPreview(null);
-                    return;
-                  }
-                  event.preventDefault();
-                  event.dataTransfer.dropEffect = "move";
-                  const rect = event.currentTarget.getBoundingClientRect();
-                  const position = workspacePointerMovePosition((event.clientY - rect.top) / rect.height);
-                  workspaceDropPreviewRef.current = { workspaceId: sourceWorkspaceId, targetWorkspaceId: workspace.id, position };
-                  setWorkspaceDropPreview((current) =>
-                    current?.workspaceId === sourceWorkspaceId &&
-                    current.targetWorkspaceId === workspace.id &&
-                    current.position === position
-                      ? current
-                      : { workspaceId: sourceWorkspaceId, targetWorkspaceId: workspace.id, position },
-                  );
-                }}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  const preview = workspaceDropPreviewRef.current;
-                  draggedWorkspaceId.current = null;
-                  workspaceDropPreviewRef.current = null;
-                  setWorkspaceDropPreview(null);
-                  if (preview) void reorderWorkspace(preview.workspaceId, preview.targetWorkspaceId, preview.position);
-                }}
-                onDragEnd={() => {
-                  draggedWorkspaceId.current = null;
-                  workspaceDropPreviewRef.current = null;
-                  setWorkspaceDropPreview(null);
-                }}
+              </div>
+              <div className="mobile-tab-navigation">
+                {activeWorkspace.tabs.map((tab) => (
+                  <a
+                    key={tab.id}
+                    href={workspaceTabPath(activeWorkspace.id, tab.id)}
+                    className={tab.id === activeTab?.id ? "active" : ""}
+                    aria-current={tab.id === activeTab?.id ? "page" : undefined}
+                    onClick={(event) => activateWorkspaceLink(
+                      event,
+                      activeWorkspace.id,
+                      tab.id,
+                    )}
+                  >
+                    <span aria-hidden="true">[T]</span>
+                    <span>{tab.title}</span>
+                    {(unreadByTabId.get(tab.id) ?? 0) > 0 ? (
+                      <span className="badge">{unreadByTabId.get(tab.id)}</span>
+                    ) : null}
+                  </a>
+                ))}
+              </div>
+              {activeTab && activeTab.panes.length > 1 ? (
+                <div
+                  className="mobile-pane-navigation"
+                  aria-label={`Panes in ${activeTab.title}`}
                 >
-                  <span className={`workspace-state-dot ${workspaceStateClass}`} title={workspaceStateTitle} />
-                  {hasBell ? <Bell size={10} className="workspace-bell-indicator" aria-label="Terminal bell" /> : null}
-                  <span className="workspace-title">
-                    {workspace.createdBy === "agent" ? (
-                      <span className="workspace-origin-badge" title="Created by an agent">AI</span>
-                    ) : null}
-                    <span className="workspace-title-text">{workspace.name}</span>
-                    {version?.status === "outdated" ? (
-                      <span
-                        className={`workspace-version-badge ${version.status}`}
-                        title={version.detail}
-                        aria-label={version.detail}
-                        data-version-status={version.status}
+                  <span className="mobile-pane-navigation-label">Panes</span>
+                  {activeTab.panes.map((pane, index) => {
+                    const paneMachine = machineFor(displayMachines, pane.machineId);
+                    const paneActive = pane.id === activePane?.id;
+                    return (
+                      <button
+                        key={pane.id}
+                        type="button"
+                        className={paneActive ? "active" : ""}
+                        aria-pressed={paneActive}
+                        onClick={() => {
+                          activatePaneInTab(activeTab.id, pane.id);
+                          collapseSidebar();
+                          if (mobileSurfaceMode === "terminal") {
+                            requestTerminalFocus(
+                              activeWorkspace.id,
+                              activeTab.id,
+                            );
+                          }
+                        }}
                       >
-                        {version.label}
-                      </span>
-                    ) : null}
-                  </span>
-                  {unreadCount > 0 ? <span className="badge workspace-badge">{unreadCount}{treeRow.hiddenActivity.unreadCount ? "*" : ""}</span> : null}
-                  {treeRow.hiddenActivity.agentStatus ? (
-                    <span
-                      className={`workspace-hidden-branch-status ${treeRow.hiddenActivity.agentStatus}`}
-                      title={`Hidden descendant agent status: ${treeRow.hiddenActivity.agentStatus}`}
-                      aria-label={`Hidden descendant agent status: ${treeRow.hiddenActivity.agentStatus}`}
-                    >
-                      ↳ {treeRow.hiddenActivity.agentStatus}
-                    </span>
-                  ) : null}
-                  <span className="workspace-meta">
-                    {showDescriptor ? <span className="workspace-descriptor">{visibleDescriptor}</span> : null}
-                    <span className="workspace-host">{hostContext}</span>
-                  </span>
-                  {cwdDisplay ? (
-                    <span className="workspace-cwd" title={cwdDisplay.full}>
-                      <span className="workspace-cwd-edge">{cwdDisplay.prefix}</span>
-                      {cwdDisplay.marker ? <span className="workspace-cwd-marker">{cwdDisplay.marker}</span> : null}
-                      {cwdDisplay.suffix ? <span className="workspace-cwd-edge">{cwdDisplay.suffix}</span> : null}
-                    </span>
-                  ) : null}
-                </a>
-                {mobileViewport.isMobile || !workspaceTree.movesDisabled ? (
-                  <button
-                    type="button"
-                    className="workspace-move-button"
-                    title={mobileViewport.isMobile ? `Workspace options for ${workspace.name}` : `Move ${workspace.name}`}
-                    aria-label={mobileViewport.isMobile ? `Workspace options for ${workspace.name}` : `Move ${workspace.name}`}
-                    onClick={(event) => setMoveWorkspace({ workspaceId: workspace.id, returnFocus: event.currentTarget })}
-                  >
-                    <MoreHorizontal size={14} />
-                  </button>
-                ) : null}
-              </div>
-              );
-            })}
-            {mobileViewport.isMobile && activeWorkspace ? (
-              <div className="mobile-session-navigation" aria-label={`Sessions in ${activeWorkspace.name}`}>
-                <div className="mobile-session-navigation-header">
-                  <span>Tabs</span>
-                  <button
-                    type="button"
-                    title={`New tab on ${selectedMachine?.name ?? targetMachineId}`}
-                    aria-label={`New tab on ${selectedMachine?.name ?? targetMachineId}`}
-                    disabled={!selectedMachine?.reachable}
-                    onClick={() => createTab(targetMachineId)}
-                  >
-                    <Plus size={16} />
-                  </button>
+                        <span>Pane {index + 1}</span>
+                        <strong>{pane.title}</strong>
+                        <small>{paneMachine?.name ?? pane.machineId}</small>
+                        {(unreadByPaneId.get(pane.id) ?? 0) > 0 ? (
+                          <span className="badge">{unreadByPaneId.get(pane.id)}</span>
+                        ) : null}
+                      </button>
+                    );
+                  })}
                 </div>
-                <div className="mobile-tab-navigation">
-                  {activeWorkspace.tabs.map((tab) => (
-                    <a
-                      key={tab.id}
-                      href={workspaceTabPath(activeWorkspace.id, tab.id)}
-                      className={tab.id === activeTab?.id ? "active" : ""}
-                      aria-current={tab.id === activeTab?.id ? "page" : undefined}
-                      onClick={(event) => activateWorkspaceLink(event, activeWorkspace.id, tab.id)}
-                    >
-                      <TerminalSquare size={16} aria-hidden="true" />
-                      <span>{tab.title}</span>
-                      {(unreadByTabId.get(tab.id) ?? 0) > 0 ? <span className="badge">{unreadByTabId.get(tab.id)}</span> : null}
-                    </a>
-                  ))}
-                </div>
-                {activeTab && activeTab.panes.length > 1 ? (
-                  <div className="mobile-pane-navigation" aria-label={`Panes in ${activeTab.title}`}>
-                    <span className="mobile-pane-navigation-label">Panes</span>
-                    {activeTab.panes.map((pane, index) => {
-                      const paneMachine = machineFor(displayMachines, pane.machineId);
-                      const paneActive = pane.id === activePane?.id;
-                      return (
-                        <button
-                          key={pane.id}
-                          type="button"
-                          className={paneActive ? "active" : ""}
-                          aria-pressed={paneActive}
-                          onClick={() => {
-                            activatePaneInTab(activeTab.id, pane.id);
-                            collapseSidebar();
-                            if (mobileSurfaceMode === "terminal") {
-                              requestTerminalFocus(activeWorkspace.id, activeTab.id);
-                            }
-                          }}
-                        >
-                          <span>Pane {index + 1}</span>
-                          <strong>{pane.title}</strong>
-                          <small>{paneMachine?.name ?? pane.machineId}</small>
-                          {(unreadByPaneId.get(pane.id) ?? 0) > 0 ? <span className="badge">{unreadByPaneId.get(pane.id)}</span> : null}
-                        </button>
-                      );
-                    })}
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
-        </nav>
-        {mobileViewport.isMobile ? (
-          <button
-            type="button"
-            className="sidebar-label host-label mobile-host-summary"
-            aria-expanded={mobileHostsExpanded}
-            aria-controls="wmux-mobile-host-list"
-            onClick={() => setMobileHostsExpanded((current) => !current)}
-          >
-            <span>Host status</span>
-            <span>{reachableMachineCount}/{displayMachines.length} on {mobileHostsExpanded ? "−" : "+"}</span>
-          </button>
-        ) : <div className="sidebar-label host-label">Host status</div>}
-        <div
-          id={mobileViewport.isMobile ? "wmux-mobile-host-list" : undefined}
-          className={`machine-list ${mobileViewport.isMobile && !mobileHostsExpanded ? "mobile-collapsed" : ""}`}
-        >
-          {displayMachines.map((machine) => (
-            <div
-              key={machine.id}
-              className={`machine-row ${machine.reachable ? "" : "offline"}`}
-              title={[machine.name, machine.reason, machine.backendDetail, machine.endpoint].filter(Boolean).join(" / ") || machine.kind}
-            >
-              <Server size={14} />
-              <span className="machine-name">{versionedMachineName(machine)}</span>
-              <span className={`reach-dot ${machine.reachable ? "on" : ""}`} />
-              <span className="machine-detail">{machineStatusDetail(machine)}</span>
-            </div>
-          ))}
-        </div>
-        {moveWorkspace ? (
-          <WorkspaceMoveDialog
-            workspaceId={moveWorkspace.workspaceId}
-            workspaces={state.workspaces}
-            returnFocus={moveWorkspace.returnFocus}
-            onClose={() => setMoveWorkspace(null)}
-            onMove={(intent: WorkspaceMoveIntent) => reorderWorkspace(intent.workspaceId, intent.targetWorkspaceId, intent.position)}
-            allowMove={!workspaceTree.movesDisabled}
-            onRequestClose={mobileViewport.isMobile
-              ? (workspaceId) => requestCloseWorkspace(workspaceId, moveWorkspace.returnFocus)
-              : undefined}
-          />
-        ) : null}
-      </aside>
+              ) : null}
+            </nav>
+          ) : null}
+        </OpenTuiSidebar>
       )}
       <div
         className="sidebar-resizer"
@@ -2092,13 +1804,10 @@ export function AppShell() {
           keybindings={keybindings}
           appleKeybindings={appleKeybindings}
           defaults={settingsDefaults}
-          surface={!mobileViewport.isMobile ? settingsSurface : "dom"}
           onPreview={setPreviewSettings}
           onSave={updateSettings}
           onCancel={cancelSettings}
           onManageMachines={openMachineManager}
-          onUseDomFallback={!mobileViewport.isMobile ? () => setSettingsSurface("dom") : undefined}
-          onUseOpenTui={!mobileViewport.isMobile ? () => setSettingsSurface("opentui") : undefined}
         />
       ) : null}
       {machineManagerOpen ? (

@@ -44,6 +44,8 @@ test("adds a machine, creates a workspace on it, and removes it without shell ac
 
   const manager = page.getByRole("dialog", { name: "Machine management" });
   await expect(manager).toBeVisible();
+  await expect(manager).toHaveAttribute("data-surface", "console");
+  await expect(manager.getByText("WMUX / HOST DIRECTORY")).toBeVisible();
   const idInput = manager.getByRole("textbox", { name: "ID", exact: true });
   await idInput.fill(machineId);
   await expect(idInput).toHaveValue(machineId);
@@ -114,4 +116,25 @@ test("adds a machine, creates a workspace on it, and removes it without shell ac
     };
     return payload.staticMachines.some((machine) => machine.id === machineId);
   }).toBe(false);
+});
+
+test("uses the canvas console settings surface on desktop and mobile", async ({
+  page,
+}, testInfo) => {
+  const mobile = testInfo.project.name.startsWith("mobile-");
+
+  await runPaletteCommand(page, mobile, "Open settings");
+
+  const settings = page.getByRole("dialog", { name: "Settings" });
+  await expect(settings).toBeVisible();
+  await expect(settings.locator(".open-tui-settings-canvas")).toBeVisible();
+  await expect(page.locator("form.settings-panel")).toHaveCount(0);
+  await expect(page.getByTitle("Use DOM settings fallback")).toHaveCount(0);
+
+  await page.keyboard.press("Enter");
+  const editor = settings.locator(".open-tui-settings-editor-input");
+  await expect(editor).toHaveAttribute("inputmode", "numeric");
+  await editor.fill("15");
+  await editor.press("Enter");
+  await expect(editor).toHaveCount(0);
 });

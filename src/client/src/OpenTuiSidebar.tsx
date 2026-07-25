@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { MutableRefObject } from "react";
+import type { MutableRefObject, ReactNode, Ref } from "react";
 import {
   createGrid,
   createGridPainter,
@@ -60,6 +60,10 @@ export interface OpenTuiSidebarMachine {
 }
 
 interface OpenTuiSidebarProps {
+  containerRef?: Ref<HTMLElement>;
+  className?: string;
+  ariaHidden?: boolean;
+  children?: ReactNode;
   targetMachineId: string;
   targetMachineName: string;
   targetMachineReachable: boolean;
@@ -75,6 +79,12 @@ interface OpenTuiSidebarProps {
   ) => void | Promise<void>;
   onToggleWorkspace: (workspaceId: string) => void | Promise<void>;
   movesDisabled: boolean;
+  pointerReorderDisabled?: boolean;
+  workspaceActions?: boolean;
+  onRequestCloseWorkspace?: (
+    workspaceId: string,
+    returnFocus: HTMLElement | null,
+  ) => void;
   allWorkspaces: Workspace[];
 }
 
@@ -137,6 +147,10 @@ interface SemanticSpaceRow {
 }
 
 export function OpenTuiSidebar({
+  containerRef,
+  className,
+  ariaHidden,
+  children,
   targetMachineId,
   targetMachineName,
   targetMachineReachable,
@@ -148,6 +162,9 @@ export function OpenTuiSidebar({
   onReorderWorkspace,
   onToggleWorkspace,
   movesDisabled,
+  pointerReorderDisabled = false,
+  workspaceActions = false,
+  onRequestCloseWorkspace,
   allWorkspaces,
 }: OpenTuiSidebarProps) {
   const theme = useOpenTuiTheme();
@@ -162,6 +179,12 @@ export function OpenTuiSidebar({
   const metricsRef = useRef<CellMetrics>({ width: 8, height: 16, cols: 1, rows: 1 });
   const paintRef = useRef<(() => void) | null>(null);
   const workspaceDragRef = useRef<WorkspacePointerDrag | null>(null);
+  const workspaceScrollRef = useRef<{
+    pointerId: number;
+    startY: number;
+    startOffset: number;
+    moved: boolean;
+  } | null>(null);
   const suppressClickRef = useRef(false);
   const hasRunningWorkspace = workspaces.some((workspace) => workspace.agentStatus === "running");
 
@@ -252,7 +275,18 @@ export function OpenTuiSidebar({
   };
 
   const onPointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    if (event.button !== 0 || movesDisabled) return;
+    if (event.button !== 0) return;
+    if (pointerReorderDisabled) {
+      event.currentTarget.setPointerCapture(event.pointerId);
+      workspaceScrollRef.current = {
+        pointerId: event.pointerId,
+        startY: event.clientY,
+        startOffset: workspaceScrollOffset,
+        moved: false,
+      };
+      return;
+    }
+    if (movesDisabled) return;
     const hit = hitAt(event.clientX, event.clientY);
     if (hit?.action.type !== "workspace") return;
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -268,6 +302,24 @@ export function OpenTuiSidebar({
   const onPointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    const scroll = workspaceScrollRef.current;
+    if (scroll?.pointerId === event.pointerId) {
+      const deltaY = scroll.startY - event.clientY;
+      if (!scroll.moved && Math.abs(deltaY) > 5) {
+        scroll.moved = true;
+        suppressClickRef.current = true;
+      }
+      if (scroll.moved) {
+        event.preventDefault();
+        const deltaRows = Math.round(deltaY / metricsRef.current.height);
+        setWorkspaceScrollOffset(Math.max(
+          0,
+          Math.min(workspaces.length - 1, scroll.startOffset + deltaRows),
+        ));
+        canvas.style.cursor = "grabbing";
+        return;
+      }
+    }
     const drag = workspaceDragRef.current;
     if (drag?.pointerId === event.pointerId) {
       if (!drag.dragging && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) > 5) {
@@ -316,6 +368,18 @@ export function OpenTuiSidebar({
   };
 
   const finishWorkspaceDrag = (event: React.PointerEvent<HTMLCanvasElement>, cancelled = false) => {
+    const scroll = workspaceScrollRef.current;
+    if (scroll?.pointerId === event.pointerId) {
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+      workspaceScrollRef.current = null;
+      event.currentTarget.style.cursor = "default";
+      if (scroll.moved) window.setTimeout(() => {
+        suppressClickRef.current = false;
+      }, 0);
+      return;
+    }
     const drag = workspaceDragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
@@ -332,69 +396,89 @@ export function OpenTuiSidebar({
   };
 
   return (
-    <aside id="wmux-sidebar" className="sidebar open-tui-sidebar" aria-label="Workspace navigation">
-      <canvas
-        ref={canvasRef}
-        className="open-tui-canvas"
-        onClick={onClick}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={finishWorkspaceDrag}
-        onPointerCancel={(event) => finishWorkspaceDrag(event, true)}
-        onWheel={(event) => {
-          if (event.deltaY === 0 || workspaces.length === 0) return;
-          event.preventDefault();
-          setWorkspaceScrollOffset((value) => Math.max(0, Math.min(workspaces.length - 1, value + (event.deltaY > 0 ? 1 : -1))));
-        }}
-      />
-      <div className="open-tui-sidebar-semantics">
-        <nav aria-label="Spaces">
-          {semanticSpaces.map(({ machine, row, rowCount }) => (
-            <button
-              key={machine.id}
-              type="button"
-              className="open-tui-space-semantic"
-              style={{ top: row * metricsRef.current.height, height: rowCount * metricsRef.current.height }}
-              aria-current={machine.id === targetMachineId ? "true" : undefined}
-              aria-label={`${machine.name}, ${machine.reachable ? "online" : "offline"}, ${machine.workspaceCount} ${machine.workspaceCount === 1 ? "agent session" : "agent sessions"}`}
-              onClick={() => onTargetMachineChange(machine.id)}
-            />
-          ))}
-        </nav>
-        <div
-          role="tree"
-          aria-label="Agents"
-          data-grouping="space"
-          data-target-space-id={targetMachineId}
-        >
-        {semanticRows.map(({ workspace, row, rowCount }) => (
+    <aside
+      ref={containerRef}
+      id="wmux-sidebar"
+      className={`sidebar open-tui-sidebar${className ? ` ${className}` : ""}${children ? " open-tui-sidebar-with-footer" : ""}`}
+      aria-label="Workspace navigation"
+      aria-hidden={ariaHidden}
+    >
+      <div className="open-tui-sidebar-surface">
+        <canvas
+          ref={canvasRef}
+          className="open-tui-canvas"
+          onClick={onClick}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={finishWorkspaceDrag}
+          onPointerCancel={(event) => finishWorkspaceDrag(event, true)}
+          onWheel={(event) => {
+            if (event.deltaY === 0 || workspaces.length === 0) return;
+            event.preventDefault();
+            setWorkspaceScrollOffset((value) => Math.max(0, Math.min(workspaces.length - 1, value + (event.deltaY > 0 ? 1 : -1))));
+          }}
+        />
+        <div className="open-tui-sidebar-semantics">
+          <nav aria-label="Spaces">
+            {semanticSpaces.map(({ machine, row, rowCount }) => (
+              <button
+                key={machine.id}
+                type="button"
+                className="open-tui-space-semantic"
+                style={{ top: row * metricsRef.current.height, height: rowCount * metricsRef.current.height }}
+                aria-current={machine.id === targetMachineId ? "true" : undefined}
+                aria-label={`${machine.name}, ${machine.reachable ? "online" : "offline"}, ${machine.workspaceCount} ${machine.workspaceCount === 1 ? "agent session" : "agent sessions"}`}
+                onClick={() => onTargetMachineChange(machine.id)}
+              />
+            ))}
+          </nav>
           <div
-            key={workspace.id}
-            className="open-tui-semantic-row"
-            style={{ top: row * metricsRef.current.height, height: rowCount * metricsRef.current.height }}
+            role="tree"
+            aria-label="Agents"
+            data-grouping="space"
+            data-target-space-id={targetMachineId}
           >
-            <a
-              href={workspaceTabPath(workspace.id, workspace.tabId)}
-              role="treeitem"
-              aria-level={workspace.depth + 1}
-              aria-current={workspace.active ? "page" : undefined}
-              aria-expanded={workspace.hasChildren ? workspace.expanded : undefined}
-              aria-label={`${workspace.title}${workspace.agentCreated ? `, created by ${workspace.agentName ?? "an agent"}` : ""}${workspace.hiddenUnreadCount ? `, ${workspace.hiddenUnreadCount} hidden unread` : ""}${workspace.hiddenAgentStatus ? `, hidden descendant agent status ${workspace.hiddenAgentStatus}` : ""}`}
-              data-agent-created={workspace.agentCreated ? "true" : undefined}
-              onClick={(event) => {
-                if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-                event.preventDefault();
-                onActivateWorkspace(workspace.id, workspace.tabId);
-              }}
-            />
-            {workspace.hasChildren ? (
-              <button className="semantic-disclosure" type="button" aria-label={`${workspace.expanded ? "Collapse" : "Expand"} ${workspace.title}`} onClick={() => void onToggleWorkspace(workspace.id)} />
-            ) : null}
-            {!movesDisabled ? <button className="semantic-move" type="button" aria-label={`Move ${workspace.title}`} onClick={(event) => setMoveWorkspace({ workspaceId: workspace.id, returnFocus: event.currentTarget })} /> : null}
+          {semanticRows.map(({ workspace, row, rowCount }) => (
+            <div
+              key={workspace.id}
+              className="open-tui-semantic-row"
+              style={{ top: row * metricsRef.current.height, height: rowCount * metricsRef.current.height }}
+            >
+              <a
+                href={workspaceTabPath(workspace.id, workspace.tabId)}
+                role="treeitem"
+                aria-level={workspace.depth + 1}
+                aria-current={workspace.active ? "page" : undefined}
+                aria-expanded={workspace.hasChildren ? workspace.expanded : undefined}
+                aria-label={`${workspace.title}${workspace.agentCreated ? `, created by ${workspace.agentName ?? "an agent"}` : ""}${workspace.hiddenUnreadCount ? `, ${workspace.hiddenUnreadCount} hidden unread` : ""}${workspace.hiddenAgentStatus ? `, hidden descendant agent status ${workspace.hiddenAgentStatus}` : ""}`}
+                data-agent-created={workspace.agentCreated ? "true" : undefined}
+                draggable={!pointerReorderDisabled && !movesDisabled}
+                onClick={(event) => {
+                  if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                  event.preventDefault();
+                  onActivateWorkspace(workspace.id, workspace.tabId);
+                }}
+              />
+              {workspace.hasChildren ? (
+                <button className="semantic-disclosure" type="button" aria-label={`${workspace.expanded ? "Collapse" : "Expand"} ${workspace.title}`} onClick={() => void onToggleWorkspace(workspace.id)} />
+              ) : null}
+              {!movesDisabled ? (
+                <button
+                  className="semantic-move"
+                  type="button"
+                  aria-label={`${workspaceActions ? "Workspace options for" : "Move"} ${workspace.title}`}
+                  onClick={(event) => setMoveWorkspace({
+                    workspaceId: workspace.id,
+                    returnFocus: event.currentTarget,
+                  })}
+                />
+              ) : null}
+            </div>
+          ))}
           </div>
-        ))}
         </div>
       </div>
+      {children ? <div className="open-tui-sidebar-footer">{children}</div> : null}
       {moveWorkspace ? (
         <WorkspaceMoveDialog
           workspaceId={moveWorkspace.workspaceId}
@@ -402,6 +486,13 @@ export function OpenTuiSidebar({
           returnFocus={moveWorkspace.returnFocus}
           onClose={() => setMoveWorkspace(null)}
           onMove={(intent: WorkspaceMoveIntent) => onReorderWorkspace(intent.workspaceId, intent.targetWorkspaceId, intent.position)}
+          allowMove={!movesDisabled}
+          onRequestClose={onRequestCloseWorkspace
+            ? (workspaceId) => onRequestCloseWorkspace(
+              workspaceId,
+              moveWorkspace.returnFocus,
+            )
+            : undefined}
         />
       ) : null}
     </aside>
@@ -555,9 +646,6 @@ const drawSidebarGrid = (
     700,
   );
   row++;
-  write(row, 3, "all sessions", rgba.faint, 700);
-  write(row, Math.max(13, cols - 8), "GROUPED", rgba.faint, 700);
-  row += 2;
   const workspaceEndRow = rows - 1;
   let visibleWorkspaceCount = 0;
   if (model.workspaces.length === 0) {
