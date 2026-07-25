@@ -25,7 +25,7 @@
     "test:e2e:chromium": "playwright test --project=chromium --project=mobile-chromium",
     "test:e2e:auth": "playwright test --config=playwright.auth.config.ts",
     "test:e2e:server": "playwright test --config=playwright.server.config.ts",
-    "test:e2e:browser": "playwright test --config=playwright.browser.config.ts",
+    "test:e2e:browser": "playwright test --config=playwright.browser.config.ts --project=chromium --project=mobile-chromium && playwright test --config=playwright.browser.config.ts --project=mobile-webkit",
     "test:e2e:serve": "node --import tsx e2e/remote-server.ts",
     "docs:screenshots": "playwright test e2e/docs-screenshots.spec.ts --project=chromium --project=mobile-chromium",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit",
