@@ -52,7 +52,6 @@ interface OpenTuiSettingsModalProps {
   onSave: (settings: WmuxSettings) => void | Promise<void>;
   onCancel: () => void;
   onManageMachines: () => void;
-  onUseDomFallback?: () => void;
   onRunSessionAudit: () => void | Promise<void>;
   onCleanupSession: (
     backend: "tmux" | "screen" | "agent",
@@ -65,7 +64,7 @@ interface OpenTuiSettingsModalProps {
 
 type FieldId = "font" | "scrollback" | `alias:${string}`;
 type ChoiceId = "scheme" | "inactive-streaming" | "frame-rate" | "terminal-scroll";
-type FocusId = FieldId | ChoiceId | "manage" | "dom" | "close" | "audit" | "reset" | "cancel" | "save" | `cleanup:${string}` | `revoke:${string}` | `rotate:${string}`;
+type FocusId = FieldId | ChoiceId | "manage" | "close" | "audit" | "reset" | "cancel" | "save" | `cleanup:${string}` | `revoke:${string}` | `rotate:${string}`;
 
 interface EditState {
   id: FieldId;
@@ -191,7 +190,6 @@ export function OpenTuiSettingsModal({
   onSave,
   onCancel,
   onManageMachines,
-  onUseDomFallback,
   onRunSessionAudit,
   onCleanupSession,
   onRevokeBrowserSession,
@@ -200,9 +198,17 @@ export function OpenTuiSettingsModal({
   const theme = useOpenTuiTheme();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const editorInputRef = useRef<HTMLInputElement | null>(null);
   const hitsRef = useRef<HitZone[]>([]);
   const metricsRef = useRef<CellMetrics>({ width: 8, height: 16, cols: 1, rows: 1 });
   const draftRef = useRef(draft);
+  const pointerScrollRef = useRef<{
+    pointerId: number;
+    startY: number;
+    startOffset: number;
+    moved: boolean;
+  } | null>(null);
+  const suppressClickRef = useRef(false);
   const [focusId, setFocusId] = useState<FocusId>("font");
   const [editing, setEditing] = useState<EditState | null>(null);
   const [scrollOffset, setScrollOffset] = useState(0);
@@ -214,8 +220,19 @@ export function OpenTuiSettingsModal({
   }, [draft]);
 
   useEffect(() => {
-    panelRef.current?.focus();
+    const focusPanel = () => panelRef.current?.focus({ preventScroll: true });
+    focusPanel();
+    const focusFrame = window.requestAnimationFrame(focusPanel);
+    return () => window.cancelAnimationFrame(focusFrame);
   }, []);
+
+  useEffect(() => {
+    if (!editing) return;
+    const input = editorInputRef.current;
+    if (!input) return;
+    input.focus({ preventScroll: true });
+    input.setSelectionRange(input.value.length, input.value.length);
+  }, [editing?.id]);
 
   const layout = useMemo(
     () => buildLayout(
@@ -282,7 +299,7 @@ export function OpenTuiSettingsModal({
       const metrics = syncPainterViewport(painter, canvas, entry);
       metricsRef.current = metrics;
       setViewportRows((current) => (current === metrics.rows ? current : metrics.rows));
-      painter.paint(drawSettings(metrics, layout, focusId, editing, scrollOffset, saving, hitsRef.current, !!onUseDomFallback, theme));
+      painter.paint(drawSettings(metrics, layout, focusId, editing, scrollOffset, saving, hitsRef.current, theme));
     };
 
     paint();
@@ -291,7 +308,7 @@ export function OpenTuiSettingsModal({
       observer.disconnect();
       painter.dispose();
     };
-  }, [editing, focusId, layout, onUseDomFallback, saving, scrollOffset, theme]);
+  }, [editing, focusId, layout, saving, scrollOffset, theme]);
 
   const applyNextDraft = (nextDraft: WmuxSettings) => {
     draftRef.current = nextDraft;
@@ -357,11 +374,6 @@ export function OpenTuiSettingsModal({
     if (id === "manage") {
       commitEditing();
       onManageMachines();
-      return;
-    }
-    if (id === "dom") {
-      commitEditing();
-      onUseDomFallback?.();
       return;
     }
     if (id === "close" || id === "cancel") {
@@ -512,7 +524,22 @@ export function OpenTuiSettingsModal({
     }
   };
 
+  useEffect(() => {
+    const routeDetachedKeyDown = (event: KeyboardEvent) => {
+      const panel = panelRef.current;
+      if (!panel || panel.contains(event.target as Node)) return;
+      event.stopPropagation();
+      onKeyDown(event as unknown as ReactKeyboardEvent<HTMLDivElement>);
+    };
+    document.addEventListener("keydown", routeDetachedKeyDown, true);
+    return () => document.removeEventListener("keydown", routeDetachedKeyDown, true);
+  });
+
   const onCanvasClick = (event: ReactMouseEvent<HTMLCanvasElement>) => {
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false;
+      return;
+    }
     const hit = hitFromEvent(event.clientX, event.clientY);
     panelRef.current?.focus();
     if (!hit) return;
@@ -544,11 +571,52 @@ export function OpenTuiSettingsModal({
     setFocusId(hit.id);
   };
 
+  const onPointerDown = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    if (event.button !== 0) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    pointerScrollRef.current = {
+      pointerId: event.pointerId,
+      startY: event.clientY,
+      startOffset: scrollOffset,
+      moved: false,
+    };
+  };
+
   const onPointerMove = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    const scroll = pointerScrollRef.current;
+    if (scroll?.pointerId === event.pointerId) {
+      const deltaY = scroll.startY - event.clientY;
+      if (!scroll.moved && Math.abs(deltaY) > 5) {
+        scroll.moved = true;
+        suppressClickRef.current = true;
+      }
+      if (scroll.moved) {
+        event.preventDefault();
+        const deltaRows = Math.round(deltaY / metricsRef.current.height);
+        setScrollOffset(Math.min(
+          maxScrollOffset,
+          Math.max(0, scroll.startOffset + deltaRows),
+        ));
+      }
+    }
     const hit = hitFromEvent(event.clientX, event.clientY);
     const canvas = canvasRef.current;
     if (!canvas) return;
     canvas.style.cursor = hit ? "pointer" : "default";
+  };
+
+  const onPointerEnd = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    const scroll = pointerScrollRef.current;
+    if (!scroll || scroll.pointerId !== event.pointerId) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    pointerScrollRef.current = null;
+    if (scroll.moved) {
+      window.setTimeout(() => {
+        suppressClickRef.current = false;
+      }, 0);
+    }
   };
 
   const onWheel = (event: ReactWheelEvent<HTMLDivElement>) => {
@@ -581,7 +649,46 @@ export function OpenTuiSettingsModal({
         onKeyDown={onKeyDown}
         onWheel={onWheel}
       >
-        <canvas ref={canvasRef} className="open-tui-settings-canvas" onClick={onCanvasClick} onPointerMove={onPointerMove} />
+        <canvas
+          ref={canvasRef}
+          className="open-tui-settings-canvas"
+          onClick={onCanvasClick}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerEnd}
+          onPointerCancel={onPointerEnd}
+        />
+        {editing ? (
+          <input
+            ref={editorInputRef}
+            className="open-tui-settings-editor-input"
+            aria-label={editing.id.startsWith("alias:") ? "Edit host alias" : `Edit ${editing.id}`}
+            inputMode={editing.id === "font" || editing.id === "scrollback" ? "numeric" : "text"}
+            value={editing.value}
+            onChange={(event) => {
+              const value = editing.id === "font" || editing.id === "scrollback"
+                ? event.currentTarget.value.replace(/\D/g, "").slice(0, 6)
+                : event.currentTarget.value.slice(0, 40);
+              setEditing({ ...editing, value });
+            }}
+            onKeyDown={(event) => {
+              event.stopPropagation();
+              if (event.key === "Enter") {
+                event.preventDefault();
+                commitEditing();
+                panelRef.current?.focus({ preventScroll: true });
+              } else if (event.key === "Escape") {
+                event.preventDefault();
+                setEditing(null);
+                panelRef.current?.focus({ preventScroll: true });
+              }
+            }}
+            onBlur={() => {
+              if (!editing) return;
+              commitEditing();
+            }}
+          />
+        ) : null}
       </div>
     </div>
   );
@@ -601,7 +708,7 @@ const buildLayout = (
   securityError: string,
 ): SettingsLayout => {
   const items: LayoutItem[] = [];
-  const focusableIds: FocusId[] = ["manage", "dom", "close"];
+  const focusableIds: FocusId[] = ["manage", "close"];
   let row = 0;
 
   const push = (item: LayoutItemInput) => {
@@ -756,7 +863,6 @@ const drawSettings = (
   scrollOffset: number,
   saving: boolean,
   hits: HitZone[],
-  canUseDomFallback: boolean,
   theme: OpenTuiTheme,
 ): CellGrid => {
   const { rgba } = theme;
@@ -783,12 +889,8 @@ const drawSettings = (
 
   let closeCol = Math.max(2, cols - 7);
   drawButton(grid, 1, closeCol, "X", focusId === "close", hits, "close", "activate", theme);
-  const manageCol = Math.max(2, closeCol - (canUseDomFallback ? 24 : 17));
+  const manageCol = Math.max(2, closeCol - 17);
   drawButton(grid, 1, manageCol, "MACHINES", focusId === "manage", hits, "manage", "activate", theme);
-  if (canUseDomFallback) {
-    const domCol = Math.max(2, closeCol - 7);
-    drawButton(grid, 1, domCol, "DOM", focusId === "dom", hits, "dom", "activate", theme);
-  }
 
   for (const item of layout.items) {
     const row = contentTop + item.start - scrollOffset;

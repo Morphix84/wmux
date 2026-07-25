@@ -80,21 +80,17 @@ test("navigates, persists, targets spaces, and moves nested workspaces", async (
     await expect(childItem()).toHaveAttribute("aria-level", "1");
 
     await expect(page.getByRole("button", { name: childActionName })).toBeVisible();
-    if (isMobile) {
-      await page.getByRole("combobox", { name: "Filter workspace list by host" }).selectOption("local");
-    } else {
-      const spaces = page.getByRole("navigation", { name: "Spaces" });
-      const agents = page.getByRole("tree", { name: "Agents" });
-      await expect(spaces.getByRole("button", { name: /^Local,/ })).toHaveAttribute("aria-current", "true");
-      await expect(agents).toHaveAttribute("data-grouping", "space");
-      await expect(agents).toHaveAttribute("data-target-space-id", "local");
-    }
+    const spaces = page.getByRole("navigation", { name: "Spaces" });
+    const agents = page.getByRole("tree", { name: "Agents" });
+    await expect(spaces.getByRole("button", { name: /^Local,/ })).toHaveAttribute("aria-current", "true");
+    await expect(agents).toHaveAttribute("data-grouping", "space");
+    await expect(agents).toHaveAttribute("data-target-space-id", "local");
     await expect(rootItem()).toBeVisible();
     await expect(childItem()).toBeVisible();
     if (isMobile) {
       await expect(page.getByRole("button", { name: childActionName })).toBeVisible();
       await page.getByRole("button", { name: childActionName }).click();
-      await expect(moveDialog.locator(".workspace-move-actions")).toHaveCount(0);
+      await expect(moveDialog.locator(".workspace-move-actions button")).toHaveCount(4);
       await moveDialog.getByRole("button", { name: "Close workspace", exact: true }).click();
       const closeDialog = page.getByRole("dialog", { name: "Close workspace?" });
       await closeDialog.getByRole("button", { name: "Close workspace" }).click();
@@ -133,6 +129,13 @@ test("mobile sidebar opens and activates workspaces by touch", async ({ page, re
     await expect(mobileActions.nth(1)).toHaveAccessibleName("Open agent fleet");
     await navigationToggle.tap();
     await expect(navigation).toBeVisible();
+    await expect(
+      navigation.getByRole("navigation", { name: "Spaces" }).getByRole("button").first(),
+    ).toBeVisible();
+    await expect(
+      navigation.getByRole("tree", { name: "Agents" }).getByRole("treeitem").first(),
+    ).toBeVisible();
+    await expect(navigation.getByText("Host status", { exact: true })).toHaveCount(0);
     await expect(page.getByRole("dialog", { name: "Agent fleet" })).toHaveCount(0);
     await expect(childItem).toHaveAttribute("draggable", "false");
 

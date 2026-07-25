@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from "react";
-import { Trash2, X } from "lucide-react";
 import {
   api,
   type MachineManagementCatalog,
@@ -160,22 +159,39 @@ export function MachineManagerModal({
     : undefined;
 
   return (
-    <div className="settings-backdrop" onMouseDown={(event) => event.currentTarget === event.target && onClose()}>
+    <div
+      className="settings-backdrop machine-manager-backdrop"
+      onMouseDown={(event) => event.currentTarget === event.target && onClose()}
+    >
       <form
-        className="settings-panel machine-manager-panel"
+        className="settings-panel machine-manager-panel machine-manager-console"
         role="dialog"
         aria-modal="true"
         aria-labelledby="machine-manager-title"
+        data-surface="console"
         onSubmit={(event) => {
           event.preventDefault();
           void save();
         }}
       >
-        <div className="settings-header">
-          <h2 id="machine-manager-title">Machine management</h2>
+        <div className="settings-header machine-manager-header">
+          <div>
+            <span className="machine-manager-kicker">WMUX / HOST DIRECTORY</span>
+            <h2 id="machine-manager-title">Machine management</h2>
+          </div>
           <div className="settings-header-actions">
-            <button type="button" onClick={onClose} title="Close machine management">
-              <X size={16} />
+            <span className="machine-manager-catalog-status">
+              {catalog
+                ? `[OK] ${catalog.staticMachines.length} STATIC / ${catalog.registeredHosts.length} DYNAMIC`
+                : "[WAIT] LOADING CATALOG"}
+            </span>
+            <button
+              type="button"
+              onClick={onClose}
+              title="Close machine management"
+              aria-label="Close machine management"
+            >
+              [X] CLOSE
             </button>
           </div>
         </div>
@@ -194,10 +210,11 @@ export function MachineManagerModal({
                 <button
                   type="button"
                   title={`Remove ${machine.name}`}
+                  aria-label={`Remove ${machine.name}`}
                   disabled={busy}
                   onClick={() => void removeStatic(machine)}
                 >
-                  <Trash2 size={13} />
+                  [X]
                 </button>
               </div>
             ))}
@@ -338,8 +355,14 @@ export function MachineManagerModal({
                 <button type="button" disabled={busy} onClick={() => void updateRegistered(host.id, { disabled: !host.disabled })}>
                   {host.disabled ? "[A] ENABLE" : "[D] DISABLE"}
                 </button>
-                <button type="button" disabled={busy} onClick={() => void removeRegistered(host.id, host.machine.name)}>
-                  <Trash2 size={13} />
+                <button
+                  type="button"
+                  title={`Remove ${host.machine.name}`}
+                  aria-label={`Remove ${host.machine.name}`}
+                  disabled={busy}
+                  onClick={() => void removeRegistered(host.id, host.machine.name)}
+                >
+                  [X]
                 </button>
               </div>
             )) : <div className="machine-manager-secret-state">No dynamic registrations.</div>}
@@ -347,9 +370,13 @@ export function MachineManagerModal({
         </div>
         {error ? <div className="settings-error machine-manager-error">{error}</div> : null}
         <div className="settings-actions">
-          <button type="button" onClick={onClose}>Close</button>
-          <button type="submit" disabled={!catalog || busy || !draft.id || !draft.name}>
-            {busy ? "Saving" : selectedId ? "Save machine" : "Add machine"}
+          <button type="button" aria-label="Close" onClick={onClose}>[ESC] CLOSE</button>
+          <button
+            type="submit"
+            aria-label={selectedId ? "Save machine" : "Add machine"}
+            disabled={!catalog || busy || !draft.id || !draft.name}
+          >
+            {busy ? "[WAIT] SAVING" : selectedId ? "[S] SAVE MACHINE" : "[+] ADD MACHINE"}
           </button>
         </div>
       </form>

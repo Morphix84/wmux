@@ -124,8 +124,8 @@ export function WorkspaceMoveDialog({
               {targetWorkspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}
             </select>
           </label>
-        ) : allowMove ? <p>No valid tree targets.</p> : null}
-        {allowMove ? (
+        ) : allowMove && intents.length === 0 ? <p>No valid tree targets.</p> : null}
+        {allowMove && intents.length > 0 ? (
           <div className="workspace-move-actions">
             <button type="button" disabled={!supported("before")} onClick={() => move("before")}>Move before</button>
             <button type="button" disabled={!supported("after")} onClick={() => move("after")}>Move after</button>

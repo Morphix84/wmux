@@ -335,6 +335,22 @@ body.sidebar-resizing * {
   background: var(--black);
 }
 
+.open-tui-sidebar-surface {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.open-tui-sidebar-footer {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  border-top: 1px solid var(--line);
+  background: var(--black);
+}
+
 .open-tui-canvas {
   display: block;
   width: 100%;
@@ -5001,6 +5017,90 @@ button.active-tool {
   max-height: min(820px, calc(100vh - 32px));
 }
 
+.machine-manager-backdrop {
+  background:
+    linear-gradient(rgba(5, 5, 5, 0.82), rgba(5, 5, 5, 0.82)),
+    repeating-linear-gradient(
+      0deg,
+      color-mix(in srgb, var(--gold) 5%, transparent) 0 1px,
+      transparent 1px 4px
+    );
+}
+
+.machine-manager-console {
+  grid-template-rows: 56px minmax(0, 1fr) auto;
+  border: 1px solid var(--gold-dim);
+  border-radius: 0;
+  background: var(--black);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--gold) 12%, transparent),
+    0 24px 80px rgba(0, 0, 0, 0.72);
+  clip-path: none;
+  color: var(--text);
+  font-family: var(--wmux-mono-font);
+  font-synthesis: none;
+  font-variant-ligatures: contextual common-ligatures;
+  font-feature-settings: "calt" 1, "liga" 1;
+}
+
+.machine-manager-header {
+  min-width: 0;
+  background: var(--panel);
+  padding: 6px 8px 6px 12px;
+}
+
+.machine-manager-header > div:first-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.machine-manager-kicker {
+  color: var(--faint);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+
+.machine-manager-catalog-status {
+  color: var(--green);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.machine-manager-console button {
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--black);
+  color: var(--text);
+  font: 700 10px/1 var(--wmux-mono-font);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.machine-manager-console button:hover:not(:disabled),
+.machine-manager-console button:focus-visible {
+  border-color: var(--gold);
+  background: var(--active);
+  color: var(--gold);
+}
+
+.machine-manager-console input:focus,
+.machine-manager-console select:focus,
+.machine-manager-console textarea:focus {
+  border-color: var(--gold);
+  outline: 1px solid color-mix(in srgb, var(--gold) 35%, transparent);
+  outline-offset: -2px;
+}
+
+.machine-manager-console .settings-body {
+  gap: 1px;
+  background: var(--line);
+  padding: 1px;
+}
+
 .machine-manager-body {
   grid-template-columns: minmax(210px, 0.7fr) minmax(420px, 1.6fr);
   align-content: start;
@@ -5010,8 +5110,13 @@ button.active-tool {
 .machine-manager-editor,
 .machine-manager-registered {
   min-width: 0;
-  border: 1px solid var(--line);
-  padding: 10px;
+  border: 0;
+  background: var(--black);
+  padding: 12px;
+}
+
+.machine-manager-list {
+  align-content: start;
 }
 
 .machine-manager-registered {
@@ -5026,7 +5131,8 @@ button.active-tool {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 28px;
   min-width: 0;
-  border: 1px solid color-mix(in srgb, var(--gold) 15%, transparent);
+  border: 1px solid var(--line);
+  background: var(--black);
 }
 
 .machine-manager-item + .machine-manager-item {
@@ -5035,7 +5141,8 @@ button.active-tool {
 
 .machine-manager-item.selected {
   border-color: var(--gold);
-  background: color-mix(in srgb, var(--gold) 8%, transparent);
+  background: var(--panel-2);
+  box-shadow: inset 3px 0 0 var(--gold);
 }
 
 .machine-manager-item > button:first-child {
@@ -5050,8 +5157,8 @@ button.active-tool {
 }
 
 .machine-manager-item > button:last-child {
-  width: 28px;
-  min-width: 28px;
+  width: 42px;
+  min-width: 42px;
   height: 100%;
   border-width: 0 0 0 1px;
 }
@@ -5120,7 +5227,7 @@ button.active-tool {
   border: 1px solid var(--line);
   border-radius: 0;
   color: var(--ivory);
-  background: var(--panel-2);
+  background: var(--panel);
   padding: 6px 8px;
   font: inherit;
 }
@@ -5142,7 +5249,9 @@ button.active-tool {
 }
 
 .machine-manager-secret-state {
-  border-left: 2px solid var(--gold);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--gold);
+  background: var(--panel);
   color: var(--muted);
   padding: 6px 8px;
   font-size: 10px;
@@ -5151,10 +5260,11 @@ button.active-tool {
 
 .machine-manager-registration {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto 28px;
+  grid-template-columns: minmax(0, 1fr) auto auto 42px;
   align-items: stretch;
   min-width: 0;
-  border: 1px solid color-mix(in srgb, var(--gold) 15%, transparent);
+  border: 1px solid var(--line);
+  background: var(--black);
 }
 
 .machine-manager-registration + .machine-manager-registration {
@@ -5296,6 +5406,19 @@ button.active-tool {
   touch-action: none;
 }
 
+.open-tui-settings-editor-input {
+  position: absolute;
+  z-index: 3;
+  right: 2px;
+  bottom: 2px;
+  width: 2px;
+  height: 2px;
+  border: 0;
+  opacity: 0.01;
+  padding: 0;
+  pointer-events: none;
+}
+
 @media (max-width: 800px), (max-height: 500px) and (pointer: coarse) {
   .app-shell {
     position: relative;
@@ -5312,6 +5435,16 @@ button.active-tool {
 
   .app-shell.sidebar-collapsed {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .open-tui-settings-backdrop {
+    padding: 0;
+  }
+
+  .open-tui-settings-dialog {
+    width: 100%;
+    height: 100%;
+    box-shadow: none;
   }
 
   .sidebar-resizer {
@@ -5337,16 +5470,58 @@ button.active-tool {
   }
 
   .app-shell .sidebar.mobile-open-tui-sidebar {
-    grid-template-rows: 44px auto 36px minmax(88px, 1fr) 44px auto;
+    display: grid;
+    grid-template-rows: minmax(240px, 1fr) minmax(0, auto);
     gap: 0;
     border-right-color: var(--gold-dim);
     border-radius: 0;
     background: var(--black);
-    padding: 0 8px 8px;
+    padding: 0;
     font-family: var(--wmux-mono-font);
     font-synthesis: none;
     font-variant-ligatures: common-ligatures contextual;
     font-feature-settings: "calt" 1, "liga" 1;
+  }
+
+  .mobile-open-tui-sidebar .open-tui-sidebar-surface {
+    min-height: 240px;
+  }
+
+  .mobile-open-tui-sidebar .open-tui-sidebar-footer {
+    max-height: min(42dvh, 420px);
+    overscroll-behavior: contain;
+    padding-bottom: max(8px, env(safe-area-inset-bottom));
+  }
+
+  .mobile-open-tui-sidebar .open-tui-canvas {
+    touch-action: none;
+  }
+
+  .mobile-open-tui-sidebar .open-tui-semantic-row > button.semantic-move {
+    right: 0;
+    z-index: 3;
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    border: 0;
+    background: transparent;
+    color: var(--gold-dim);
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .mobile-open-tui-sidebar .open-tui-space-semantic,
+  .mobile-open-tui-sidebar .open-tui-semantic-row > a {
+    pointer-events: auto;
+  }
+
+  .mobile-open-tui-sidebar .open-tui-semantic-row > a {
+    right: 44px;
+  }
+
+  .mobile-open-tui-sidebar .open-tui-semantic-row > button.semantic-move::before {
+    content: "[...]";
+    font: 700 10px/1 var(--wmux-mono-font);
   }
 
   .mobile-open-tui-sidebar .brand {
@@ -5707,7 +5882,7 @@ button.active-tool {
 
   .mobile-tab-navigation a {
     display: grid;
-    grid-template-columns: 20px minmax(0, 1fr) auto;
+    grid-template-columns: 32px minmax(0, 1fr) auto;
     align-items: center;
     gap: 8px;
     min-height: 48px;
@@ -6437,6 +6612,14 @@ button.active-tool {
     border-radius: 0;
     clip-path: none;
     box-shadow: none;
+  }
+
+  .machine-manager-console {
+    grid-template-rows: 56px minmax(0, 1fr) 60px;
+  }
+
+  .machine-manager-catalog-status {
+    display: none;
   }
 
   .settings-header {
