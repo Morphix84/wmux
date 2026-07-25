@@ -174,7 +174,6 @@ test("shows three concurrent agents on two machines within one event revision", 
       }),
     );
   } finally {
-    await page.close();
     for (const workspaceId of createdWorkspaceIds.reverse()) {
       await request.delete(`/api/workspaces/${workspaceId}`);
     }
