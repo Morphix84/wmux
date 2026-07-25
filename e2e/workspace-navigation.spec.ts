@@ -486,11 +486,16 @@ test("mobile chrome keeps navigation, chat, terminal, and actions reachable", as
     const rect = element.getBoundingClientRect();
     return { width: Math.round(rect.width), height: Math.round(rect.height) };
   })).toEqual({ width: 44, height: 44 });
-  const hostSummary = navigation.getByRole("button", { name: /Host status/i });
-  await expect(hostSummary).toHaveAttribute("aria-expanded", "false");
-  await expect(navigation.locator(".machine-list")).toBeHidden();
-  await hostSummary.click();
-  await expect(navigation.locator(".machine-list")).toBeVisible();
+  await expect(
+    navigation.getByRole("navigation", { name: "Spaces" }).getByRole("button").first(),
+  ).toBeVisible();
+  await expect(
+    navigation.getByRole("tree", { name: "Agents" }).getByRole("treeitem").first(),
+  ).toBeVisible();
+  await expect(navigation.getByText("Host status", { exact: true })).toHaveCount(0);
+  await expect(
+    navigation.getByRole("navigation", { name: /^Sessions in / }),
+  ).toBeVisible();
   await page.locator("button.mobile-sidebar-close").click();
   await expect(navigation).toBeHidden();
 
