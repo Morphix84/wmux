@@ -39,9 +39,9 @@ test("the npm screenshot lifecycle enables documentation capture", () => {
 });
 
 test("the Playwright runtime protects server-only endpoint credentials", () => {
-  const source = fs.readFileSync(path.join(repoRoot, "playwright.config.ts"), "utf8");
+  const source = fs.readFileSync(path.join(repoRoot, "e2e", "standard-runtime.ts"), "utf8");
 
-  assert.match(source, /fs\.chmodSync\(runtimeDir, 0o700\)/);
-  assert.match(source, /fs\.chmodSync\(runtimeHome, 0o700\)/);
-  assert.match(source, /HOME: runtimeHome/);
+  assert.match(source, /fs\.chmodSync\(directory, 0o700\)/);
+  assert.match(source, /fs\.chmodSync\(home, 0o700\)/);
+  assert.match(source, /HOME: home/);
 });
