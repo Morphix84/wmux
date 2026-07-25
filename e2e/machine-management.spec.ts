@@ -3,14 +3,7 @@ import { expect, test } from "./fixtures";
 
 async function openCommandPalette(
   page: Page,
-  mobile: boolean,
 ) {
-  if (mobile) {
-    await page.getByRole("banner", { name: "Mobile session controls" })
-      .getByRole("button", { name: "Open actions" })
-      .click();
-    return;
-  }
   await page.keyboard.press("Control+K");
 }
 
@@ -19,16 +12,16 @@ async function runPaletteCommand(
   mobile: boolean,
   title: string,
 ) {
-  await openCommandPalette(page, mobile);
+  await openCommandPalette(page);
   const palette = page.getByRole("dialog", { name: "Command palette" });
+  if (mobile) {
+    await palette.getByRole("button", { name: title, exact: false }).click();
+    return;
+  }
   const search = palette.getByPlaceholder(
     "Search commands, workspaces, tabs, hosts",
   );
-  await search.pressSequentially(title);
-  if (mobile) {
-    await expect(palette.locator(".command-item.selected .command-title"))
-      .toHaveText(title);
-  }
+  await search.fill(title);
   await search.press("Enter");
 }
 

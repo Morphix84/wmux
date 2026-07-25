@@ -15,7 +15,7 @@ import {
 } from "../shared/protocol.js";
 
 const defaultPath = (): string => path.join(os.homedir(), ".wmux", "settings.json");
-export const CURRENT_SETTINGS_SCHEMA_VERSION = 6;
+export const CURRENT_SETTINGS_SCHEMA_VERSION = 7;
 
 const persistedSettingsSchema = z.object({
   schemaVersion: z.literal(CURRENT_SETTINGS_SCHEMA_VERSION),
@@ -27,6 +27,7 @@ const persistedSettingsSchema = z.object({
   terminalScrollMode: z.unknown().optional(),
   machineAliases: z.unknown().optional(),
   collapsedWorkspaceIds: z.unknown().optional(),
+  favoriteWorkspaceIds: z.unknown().optional(),
 }).strict();
 
 export const defaultSettings: WmuxSettings = {
@@ -38,6 +39,7 @@ export const defaultSettings: WmuxSettings = {
   terminalScrollMode: "batched",
   machineAliases: {},
   collapsedWorkspaceIds: [],
+  favoriteWorkspaceIds: [],
 };
 
 export class SettingsStore extends EventEmitter {
@@ -75,6 +77,7 @@ export class SettingsStore extends EventEmitter {
       terminalScrollMode: input.terminalScrollMode ?? this.settings.terminalScrollMode,
       machineAliases: input.machineAliases ?? this.settings.machineAliases,
       collapsedWorkspaceIds: input.collapsedWorkspaceIds ?? this.settings.collapsedWorkspaceIds,
+      favoriteWorkspaceIds: input.favoriteWorkspaceIds ?? this.settings.favoriteWorkspaceIds,
     }, this.defaults.terminalFontSize);
     this.save(true);
     return this.snapshot();
@@ -132,7 +135,7 @@ export class SettingsStore extends EventEmitter {
           `settings schema ${version} is newer than this wmux build supports (${CURRENT_SETTINGS_SCHEMA_VERSION})`,
         );
       }
-      const candidate = version === undefined || version === 1 || version === 2 || version === 3 || version === 4 || version === 5
+      const candidate = version === undefined || version === 1 || version === 2 || version === 3 || version === 4 || version === 5 || version === 6
         ? { ...record, schemaVersion: CURRENT_SETTINGS_SCHEMA_VERSION, colorScheme: record.colorScheme ?? defaultSettings.colorScheme }
         : record;
       const parsed = persistedSettingsSchema.parse(candidate);
@@ -168,6 +171,7 @@ const normalizeSettings = (input: {
   terminalScrollMode?: unknown;
   machineAliases?: unknown;
   collapsedWorkspaceIds?: unknown;
+  favoriteWorkspaceIds?: unknown;
 }, terminalFontSizeFallback = defaultSettings.terminalFontSize): WmuxSettings => ({
   terminalFontSize: clampFontSize(input.terminalFontSize, terminalFontSizeFallback),
   terminalScrollbackRows: clampScrollbackRows(input.terminalScrollbackRows),
@@ -176,7 +180,8 @@ const normalizeSettings = (input: {
   tuiFrameRate: cleanTuiFrameRate(input.tuiFrameRate),
   terminalScrollMode: cleanTerminalScrollMode(input.terminalScrollMode),
   machineAliases: cleanAliases(input.machineAliases),
-  collapsedWorkspaceIds: cleanCollapsedWorkspaceIds(input.collapsedWorkspaceIds),
+  collapsedWorkspaceIds: cleanWorkspaceIds(input.collapsedWorkspaceIds),
+  favoriteWorkspaceIds: cleanWorkspaceIds(input.favoriteWorkspaceIds),
 });
 
 const colorSchemeIds = new Set<string>(TERMINAL_COLOR_SCHEME_IDS);
@@ -217,6 +222,6 @@ const cleanAliases = (aliases: unknown): Record<string, string> => {
   return cleaned;
 };
 
-const cleanCollapsedWorkspaceIds = (value: unknown): string[] => Array.isArray(value)
+const cleanWorkspaceIds = (value: unknown): string[] => Array.isArray(value)
   ? [...new Set(value.filter((id): id is string => typeof id === "string" && id.length > 0 && id.length <= 120))]
   : [];

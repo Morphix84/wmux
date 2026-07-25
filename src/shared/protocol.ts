@@ -432,6 +432,7 @@ export interface WmuxSettings {
   terminalScrollMode: TerminalScrollMode;
   machineAliases: Record<string, string>;
   collapsedWorkspaceIds: string[];
+  favoriteWorkspaceIds: string[];
 }
 
 export const DEFAULT_TERMINAL_FONT_FAMILY =

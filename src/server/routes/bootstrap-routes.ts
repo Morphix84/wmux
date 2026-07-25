@@ -106,6 +106,7 @@ export const bootstrapRoutes: readonly ApiRoute[] = [
         terminalScrollMode?: WmuxSettings["terminalScrollMode"];
         machineAliases?: Record<string, string>;
         collapsedWorkspaceIds?: string[];
+        favoriteWorkspaceIds?: string[];
       };
       deps.settings.update({
         terminalFontSize: body.terminalFontSize,
@@ -116,6 +117,7 @@ export const bootstrapRoutes: readonly ApiRoute[] = [
         terminalScrollMode: body.terminalScrollMode,
         machineAliases: body.machineAliases,
         collapsedWorkspaceIds: body.collapsedWorkspaceIds,
+        favoriteWorkspaceIds: body.favoriteWorkspaceIds,
       });
       sendJson(200, {
         settings: deps.settings.snapshot(),

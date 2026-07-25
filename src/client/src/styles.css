@@ -225,6 +225,7 @@ body,
   height: var(--wmux-viewport-height, 100dvh);
   margin: 0;
   overflow: hidden;
+  overscroll-behavior-x: none;
   touch-action: manipulation;
   background: var(--wmux-browser-chrome);
 }
@@ -661,6 +662,95 @@ button.active-tool {
   opacity: 1;
   outline: 2px solid var(--gold-hot);
   outline-offset: -2px;
+}
+
+.sidebar-context-menu {
+  position: fixed;
+  z-index: 110;
+  display: grid;
+  width: 272px;
+  border: 1px solid var(--gold-dim);
+  background: var(--black);
+  color: var(--text);
+  box-shadow: 12px 16px 0 rgba(0, 0, 0, 0.42);
+  font: 700 11px/1.2 var(--wmux-mono-font);
+}
+
+.sidebar-context-menu.confirm {
+  border-color: var(--red);
+}
+
+.sidebar-context-menu-heading {
+  display: grid;
+  gap: 3px;
+  border-bottom: 1px solid var(--line);
+  padding: 9px 10px 8px;
+  text-transform: uppercase;
+}
+
+.sidebar-context-menu-heading span {
+  color: var(--gold-dim);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+}
+
+.sidebar-context-menu-heading strong {
+  overflow: hidden;
+  color: var(--ivory);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-context-menu > button {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr);
+  align-items: center;
+  min-height: 34px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--black);
+  padding: 0 10px;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.sidebar-context-menu > button:last-child {
+  border-bottom: 0;
+}
+
+.sidebar-context-menu > button:hover,
+.sidebar-context-menu > button:focus-visible {
+  outline: 0;
+  background: var(--selection);
+  color: var(--selection-text);
+}
+
+.sidebar-context-menu > button.danger {
+  color: #ffaaa1;
+}
+
+.sidebar-context-menu > button.danger:hover,
+.sidebar-context-menu > button.danger:focus-visible {
+  background: color-mix(in srgb, var(--red) 30%, var(--black));
+  color: #ffd4d0;
+}
+
+.sidebar-context-menu > button:disabled {
+  color: var(--faint);
+  cursor: not-allowed;
+}
+
+.sidebar-context-menu > p {
+  margin: 0;
+  border-bottom: 1px solid var(--line);
+  padding: 10px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
 }
 
 .workspace-move-backdrop {
@@ -1658,7 +1748,7 @@ button.active-tool {
   bottom: 4px;
   left: calc(8px + var(--wmux-mobile-left-inset, 0px));
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   height: 32px;
 }

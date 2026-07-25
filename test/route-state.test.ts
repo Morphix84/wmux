@@ -9,6 +9,7 @@ import {
   markPaneNotificationsReadInState,
   markWorkspaceNotificationsReadInState,
   parseRouteTarget,
+  shouldReplaceWorkspaceHistory,
   workspaceTabPath,
 } from "../src/client/src/route-state.ts";
 import type { BootstrapPayload } from "../src/client/src/types.ts";
@@ -88,6 +89,13 @@ test("parseRouteTarget parses workspace and optional tab", () => {
 test("workspaceTabPath round-trips through parseRouteTarget", () => {
   const path = workspaceTabPath("ws x", "t/y");
   assert.deepEqual(parseRouteTarget(path), { workspaceId: "ws x", tabId: "t/y" });
+});
+
+test("mobile workspace switches replace history unless explicitly overridden", () => {
+  assert.equal(shouldReplaceWorkspaceHistory(true), true);
+  assert.equal(shouldReplaceWorkspaceHistory(false), false);
+  assert.equal(shouldReplaceWorkspaceHistory(true, false), false);
+  assert.equal(shouldReplaceWorkspaceHistory(false, true), true);
 });
 
 test("findWorkspaceTab resolves explicit and default tabs", () => {

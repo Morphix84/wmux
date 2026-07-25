@@ -8,7 +8,6 @@ import {
   useRef,
   useState,
   type CSSProperties,
-  type PointerEvent as ReactPointerEvent,
 } from "react";
 import { GripVertical, LoaderCircle, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
 import { api, modalSettingsUpdate, UnauthorizedError, WorkspaceReorderConflictError } from "./api";
@@ -51,7 +50,6 @@ import { maxSidebarWidth, useSidebar } from "./useSidebar";
 import { writeBrowserClipboard } from "./clipboard";
 import { summarizeWorkspaceVersion } from "./workspace-version";
 import { useMobileViewportState } from "./mobile-viewport";
-import { createMobileNavigationGesture } from "./mobile/navigation-gesture";
 import { loadMachineTargetId, persistMachineTargetId, resolveMachineTargetId } from "./machine-target";
 import { workspacePresentationDescriptor, workspacePresentationMachineId } from "./workspace-presentation";
 import {
@@ -68,7 +66,9 @@ import {
   deriveWorkspaceTree,
   expandWorkspaceAncestors,
   pruneCollapsedWorkspaceIds,
+  pruneFavoriteWorkspaceIds,
   rebaseCollapsedWorkspaceIds,
+  rebaseFavoriteWorkspaceIds,
   sameWorkspaceIds,
   type WorkspaceActivityAggregate,
 } from "./workspace-tree";
@@ -172,10 +172,12 @@ export function AppShell() {
   const collapseWriteQueue = useRef<Promise<void>>(Promise.resolve());
   const collapseWriteVersion = useRef(0);
   const desiredCollapsedWorkspaceIds = useRef<string[] | null>(null);
+  const favoriteWriteQueue = useRef<Promise<void>>(Promise.resolve());
+  const favoriteWriteVersion = useRef(0);
+  const desiredFavoriteWorkspaceIds = useRef<string[] | null>(null);
   const terminalFocusToken = useRef(0);
   const mobileSidebarRef = useRef<HTMLElement | null>(null);
   const mobileSidebarCloseRef = useRef<HTMLButtonElement | null>(null);
-  const mobileNavigationGesture = useRef(createMobileNavigationGesture());
   const finishBoot = useCallback(() => setBootComplete(true), []);
   const dismissMobileClose = useCallback(() => setPendingMobileClose(null), []);
   const openMobileNavigation = useCallback(() => {
@@ -188,49 +190,14 @@ export function AppShell() {
     if (sidebarCollapsed) openMobileNavigation();
     else collapseSidebar();
   }, [collapseSidebar, openMobileNavigation, sidebarCollapsed]);
-  const onMobileNavigationPointerDownCapture = useCallback((event: ReactPointerEvent<HTMLElement>) => {
-    if (
-      !mobileViewport.isMobile ||
-      !sidebarCollapsed ||
-      event.pointerType !== "touch" ||
-      !event.isPrimary
-    ) {
-      mobileNavigationGesture.current.cancel();
-      return;
-    }
-    mobileNavigationGesture.current.start(
-      event.pointerId,
-      event.clientX,
-      event.clientY,
-      window.visualViewport?.offsetLeft ?? 0,
-    );
-  }, [mobileViewport.isMobile, sidebarCollapsed]);
-  const onMobileNavigationPointerMoveCapture = useCallback((event: ReactPointerEvent<HTMLElement>) => {
-    if (event.pointerType !== "touch" || !event.isPrimary) return;
-    const result = mobileNavigationGesture.current.move(
-      event.pointerId,
-      event.clientX,
-      event.clientY,
-    );
-    if (!result.handled) return;
-    event.preventDefault();
-    event.stopPropagation();
-    if (result.open) openMobileNavigation();
-  }, [openMobileNavigation]);
-  const onMobileNavigationPointerUpCapture = useCallback((event: ReactPointerEvent<HTMLElement>) => {
-    if (event.pointerType !== "touch" || !event.isPrimary) return;
-    if (!mobileNavigationGesture.current.end(event.pointerId)) return;
-    event.preventDefault();
-    event.stopPropagation();
-  }, []);
-  const onMobileNavigationPointerCancelCapture = useCallback((event: ReactPointerEvent<HTMLElement>) => {
-    mobileNavigationGesture.current.cancel(event.pointerId);
-  }, []);
 
   const rebaseIncomingState = useCallback((payload: BootstrapPayload): BootstrapPayload =>
-    rebaseCollapsedWorkspaceIds(
-      applyOptimisticCreations(payload, optimisticCreations.current.values()),
-      desiredCollapsedWorkspaceIds.current,
+    rebaseFavoriteWorkspaceIds(
+      rebaseCollapsedWorkspaceIds(
+        applyOptimisticCreations(payload, optimisticCreations.current.values()),
+        desiredCollapsedWorkspaceIds.current,
+      ),
+      desiredFavoriteWorkspaceIds.current,
     ), []);
 
   useEffect(() => {
@@ -510,6 +477,8 @@ export function AppShell() {
             hiddenBell: treeRow.hiddenActivity.bell,
             hiddenAgentStatus: treeRow.hiddenActivity.agentStatus,
             canOutdent: Boolean(treeRow.parentId),
+            parentId: treeRow.parentId,
+            favorite: (persistedSettings.favoriteWorkspaceIds ?? []).includes(workspace.id),
           },
         ];
       }),
@@ -522,6 +491,7 @@ export function AppShell() {
       machines,
       unreadByWorkspaceId,
       openTuiWorkspaceTree.rows,
+      persistedSettings.favoriteWorkspaceIds,
     ],
   );
   const openTuiMachines = useMemo<OpenTuiSidebarMachine[]>(
@@ -655,6 +625,40 @@ export function AppShell() {
     void persistCollapsedWorkspaceIds(nextIds);
   }, [persistCollapsedWorkspaceIds, store]);
 
+  const persistFavoriteWorkspaceIds = useCallback((favoriteWorkspaceIds: string[]): Promise<void> => {
+    const version = ++favoriteWriteVersion.current;
+    desiredFavoriteWorkspaceIds.current = favoriteWorkspaceIds;
+    store.update((current) => current ? { ...current, settings: { ...current.settings, favoriteWorkspaceIds } } : current);
+    const request = favoriteWriteQueue.current
+      .catch(() => undefined)
+      .then(async () => {
+        const response = await api.updateFavoriteWorkspaceIds(favoriteWorkspaceIds);
+        if (version === favoriteWriteVersion.current) {
+          desiredFavoriteWorkspaceIds.current = null;
+          await refresh(response.state);
+        }
+      })
+      .catch((error) => {
+        if (version === favoriteWriteVersion.current) {
+          desiredFavoriteWorkspaceIds.current = null;
+          pushToast(`Favorite sync failed: ${describeActionError(error)}`);
+          void loadBootstrapRef.current();
+        }
+      });
+    favoriteWriteQueue.current = request;
+    return request;
+  }, [pushToast, refresh, store]);
+
+  const toggleFavoriteWorkspace = useCallback((workspaceId: string) => {
+    const current = store.get();
+    if (!current) return;
+    const currentIds = desiredFavoriteWorkspaceIds.current ?? current.settings.favoriteWorkspaceIds ?? [];
+    const nextIds = currentIds.includes(workspaceId)
+      ? currentIds.filter((id) => id !== workspaceId)
+      : [...currentIds, workspaceId];
+    void persistFavoriteWorkspaceIds(nextIds);
+  }, [persistFavoriteWorkspaceIds, store]);
+
   useEffect(() => {
     if (!state) return;
     if (desiredCollapsedWorkspaceIds.current) return;
@@ -662,6 +666,13 @@ export function AppShell() {
     if (activeWorkspace) desired = expandWorkspaceAncestors(state.workspaces, desired, activeWorkspace.id);
     if (!sameWorkspaceIds(desired, state.settings.collapsedWorkspaceIds)) void persistCollapsedWorkspaceIds(desired);
   }, [activeWorkspace?.id, persistCollapsedWorkspaceIds, state?.settings.collapsedWorkspaceIds, state?.workspaces]);
+
+  useEffect(() => {
+    if (!state || desiredFavoriteWorkspaceIds.current) return;
+    const currentIds = state.settings.favoriteWorkspaceIds ?? [];
+    const desired = pruneFavoriteWorkspaceIds(state.workspaces, currentIds);
+    if (!sameWorkspaceIds(desired, currentIds)) void persistFavoriteWorkspaceIds(desired);
+  }, [persistFavoriteWorkspaceIds, state?.settings.favoriteWorkspaceIds, state?.workspaces]);
 
   const activeWorkspaceUnreadCount = activeWorkspace ? unreadByWorkspaceId.get(activeWorkspace.id) ?? 0 : 0;
   useEffect(() => {
@@ -863,7 +874,7 @@ export function AppShell() {
       const response = await api.createWorkspace(machineId, activePane?.id, ids);
       finishOptimisticCreation(creation);
       await refresh(response.state);
-      activateWorkspaceTab(response.workspace.id, response.workspace.activeTabId, { replaceHistory: false });
+      activateWorkspaceTab(response.workspace.id, response.workspace.activeTabId);
       if (mobileViewport.isMobile) collapseSidebar();
     } catch (error) {
       finishOptimisticCreation(creation);
@@ -920,7 +931,7 @@ export function AppShell() {
       const response = await api.createTab(activeWorkspace.id, machineId, activePane?.id, ids);
       finishOptimisticCreation(creation);
       await refresh(response.state);
-      activateWorkspaceTab(activeWorkspace.id, response.tab.id, { replaceHistory: false });
+      activateWorkspaceTab(activeWorkspace.id, response.tab.id);
       if (mobileViewport.isMobile) collapseSidebar();
     } catch (error) {
       finishOptimisticCreation(creation);
@@ -970,6 +981,25 @@ export function AppShell() {
       returnFocus,
     });
   };
+
+  const closeWorkspaceGroup = guard(
+    (machineId: string) => `machine:${machineId}:close-workspaces`,
+    "Closing agent group...",
+    async (machineId: string) => {
+      const workspaceIds = (store.get()?.workspaces ?? [])
+        .filter((workspace) => workspacePresentationMachineId(workspace) === machineId)
+        .map((workspace) => workspace.id);
+      let latestState: BootstrapPayload | undefined;
+      try {
+        for (const workspaceId of workspaceIds) {
+          const response = await api.closeWorkspace(workspaceId);
+          latestState = response.state;
+        }
+      } finally {
+        if (latestState) await refresh(latestState);
+      }
+    },
+  );
 
   const closeActiveWorkspace = () => {
     if (!activeWorkspace) return;
@@ -1456,10 +1486,6 @@ export function AppShell() {
       className={appClassName}
       style={appStyle}
       aria-busy={pendingActions.length > 0}
-      onPointerDownCapture={onMobileNavigationPointerDownCapture}
-      onPointerMoveCapture={onMobileNavigationPointerMoveCapture}
-      onPointerUpCapture={onMobileNavigationPointerUpCapture}
-      onPointerCancelCapture={onMobileNavigationPointerCancelCapture}
     >
       <Toasts toasts={toasts} dismissToast={dismissToast} />
       {pendingActions.length > 0 ? (
@@ -1481,6 +1507,9 @@ export function AppShell() {
           onActivateWorkspace={activateWorkspaceFromChrome}
           onReorderWorkspace={reorderWorkspace}
           onToggleWorkspace={toggleWorkspaceCollapsed}
+          onToggleFavoriteWorkspace={toggleFavoriteWorkspace}
+          onRequestCloseWorkspace={requestCloseWorkspace}
+          onRequestCloseWorkspaceGroup={closeWorkspaceGroup}
           movesDisabled={openTuiWorkspaceTree.movesDisabled}
           allWorkspaces={state.workspaces}
         />
@@ -1651,8 +1680,6 @@ export function AppShell() {
             navigationOpen={!sidebarCollapsed}
             onToggleNavigation={toggleMobileNavigation}
             onSurfaceModeChange={setMobileSurfaceMode}
-            onOpenFleet={() => setAgentFleetOpen(true)}
-            onOpenActions={openCommandPalette}
           />
         ) : null}
         {!showMobileModeBar ? (

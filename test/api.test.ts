@@ -30,7 +30,7 @@ test("create requests carry browser-local source pane context", async () => {
   ]);
 });
 
-test("workspace tree mutations carry revisions, optional outdent targets, and collapse settings", async () => {
+test("workspace tree mutations carry revisions, optional outdent targets, and navigation settings", async () => {
   const originalFetch = globalThis.fetch;
   const requests: Array<{ path: string; body: unknown }> = [];
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -41,6 +41,7 @@ test("workspace tree mutations carry revisions, optional outdent targets, and co
     await api.reorderWorkspace("child", undefined, "out-of", 7);
     await api.reorderWorkspace("child", "root", "into", 8);
     await api.updateCollapsedWorkspaceIds(["root"]);
+    await api.updateFavoriteWorkspaceIds(["child"]);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -48,10 +49,11 @@ test("workspace tree mutations carry revisions, optional outdent targets, and co
     { path: "/api/workspaces/reorder", body: { workspaceId: "child", position: "out-of", workspaceTreeRevision: 7 } },
     { path: "/api/workspaces/reorder", body: { workspaceId: "child", targetWorkspaceId: "root", position: "into", workspaceTreeRevision: 8 } },
     { path: "/api/settings", body: { collapsedWorkspaceIds: ["root"] } },
+    { path: "/api/settings", body: { favoriteWorkspaceIds: ["child"] } },
   ]);
 });
 
-test("ordinary settings updates never transmit synchronized collapse state", async () => {
+test("ordinary settings updates never transmit synchronized sidebar state", async () => {
   const originalFetch = globalThis.fetch;
   let body: Record<string, unknown> | undefined;
   globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
@@ -67,6 +69,7 @@ test("ordinary settings updates never transmit synchronized collapse state", asy
     terminalScrollMode: "immediate" as const,
     machineAliases: { local: "Local" },
     collapsedWorkspaceIds: ["newer-collapse"],
+    favoriteWorkspaceIds: ["favorite"],
   };
   try {
     // A wider object remains harmless at runtime; the API serializes only modal-owned fields.
@@ -76,6 +79,7 @@ test("ordinary settings updates never transmit synchronized collapse state", asy
   }
   assert.deepEqual(body, modalSettingsUpdate(settings));
   assert.equal(Object.hasOwn(body ?? {}, "collapsedWorkspaceIds"), false);
+  assert.equal(Object.hasOwn(body ?? {}, "favoriteWorkspaceIds"), false);
 });
 
 test("workspace reorder conflicts expose the server's latest state without replay", async () => {

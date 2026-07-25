@@ -18,6 +18,7 @@ export const defaultSettings: WmuxSettings = {
   terminalScrollMode: "batched",
   machineAliases: {},
   collapsedWorkspaceIds: [],
+  favoriteWorkspaceIds: [],
 };
 
 export function SettingsModal({
@@ -217,6 +218,7 @@ const normalizeSettings = (
       .filter(([, alias]) => alias.length > 0),
   ),
   collapsedWorkspaceIds: settings.collapsedWorkspaceIds ?? [],
+  favoriteWorkspaceIds: settings.favoriteWorkspaceIds ?? [],
 });
 
 const clampFontSize = (

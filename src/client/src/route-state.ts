@@ -14,6 +14,11 @@ const ACTIVE_TABS_STORAGE_KEY = "wmux.activeTabs";
 export const workspaceTabPath = (workspaceId: string, tabId: string): string =>
   `/workspaces/${encodeURIComponent(workspaceId)}/tabs/${encodeURIComponent(tabId)}`;
 
+export const shouldReplaceWorkspaceHistory = (
+  isMobile: boolean,
+  requested?: boolean,
+): boolean => requested ?? isMobile;
+
 /** Parse a `/workspaces/:id(/tabs/:id)?` pathname into a route target, or null. */
 export const parseRouteTarget = (pathname: string): RouteTarget | null => {
   const match = pathname.match(/^\/workspaces\/([^/]+)(?:\/tabs\/([^/]+))?\/?$/);

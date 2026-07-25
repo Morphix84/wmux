@@ -59,7 +59,7 @@ export interface MachineManagementCatalog {
   registeredHosts: ManagedRegisteredHost[];
 }
 
-export type ModalSettingsUpdate = Omit<WmuxSettings, "collapsedWorkspaceIds">;
+export type ModalSettingsUpdate = Omit<WmuxSettings, "collapsedWorkspaceIds" | "favoriteWorkspaceIds">;
 
 export const modalSettingsUpdate = (settings: WmuxSettings): ModalSettingsUpdate => ({
   terminalFontSize: settings.terminalFontSize,
@@ -277,6 +277,11 @@ export const api = {
     json<{ settings: WmuxSettings; state: BootstrapPayload }>("/api/settings", {
       method: "POST",
       body: JSON.stringify({ collapsedWorkspaceIds }),
+    }),
+  updateFavoriteWorkspaceIds: (favoriteWorkspaceIds: string[]) =>
+    json<{ settings: WmuxSettings; state: BootstrapPayload }>("/api/settings", {
+      method: "POST",
+      body: JSON.stringify({ favoriteWorkspaceIds }),
     }),
   createWorkspace: (machineId: string, sourcePaneId?: string, clientIds?: ClientWorkspaceIds) =>
     json<{ workspace: BootstrapPayload["workspaces"][number]; state: BootstrapPayload }>("/api/workspaces", {
