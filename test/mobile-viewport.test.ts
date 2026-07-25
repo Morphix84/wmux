@@ -46,6 +46,26 @@ test("an open keyboard survives a transient move to a non-editable control", () 
   }, portrait), false);
 });
 
+test("persistent browser chrome does not latch as an open keyboard", () => {
+  const browserViewport = { width: 390, height: 664 };
+  assert.equal(mobileKeyboardLikelyOpen({
+    isMobile: true,
+    layoutHeight: 844,
+    viewportHeight: 664,
+    viewportWidth: 390,
+    editableFocused: true,
+  }, browserViewport), false);
+
+  assert.equal(mobileKeyboardLikelyOpen({
+    isMobile: true,
+    layoutHeight: 844,
+    viewportHeight: 664,
+    viewportWidth: 390,
+    editableFocused: false,
+    keyboardWasOpen: true,
+  }, browserViewport), false);
+});
+
 test("mobile keyboard detection handles visual and layout viewport resizing", () => {
   assert.equal(mobileKeyboardLikelyOpen({
     isMobile: true,
