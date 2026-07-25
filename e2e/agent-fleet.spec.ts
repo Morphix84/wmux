@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 interface FleetWorkspace {
   id: string;
@@ -7,6 +7,19 @@ interface FleetWorkspace {
     id: string;
     activePaneId: string;
   }>;
+}
+
+async function navigateToApp(page: Page): Promise<void> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await page.goto("/", { waitUntil: "commit", timeout: 10_000 });
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
 }
 
 test("shows three concurrent agents on two machines within one event revision", async ({
@@ -104,7 +117,7 @@ test("shows three concurrent agents on two machines within one event revision", 
       expect(response.ok()).toBeTruthy();
     }
 
-    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await navigateToApp(page);
     await expect(page.locator("main.app-shell")).toBeVisible({
       timeout: 20_000,
     });
