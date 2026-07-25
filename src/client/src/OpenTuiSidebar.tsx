@@ -555,9 +555,6 @@ const drawSidebarGrid = (
     700,
   );
   row++;
-  write(row, 3, "all sessions", rgba.faint, 700);
-  write(row, Math.max(13, cols - 8), "GROUPED", rgba.faint, 700);
-  row += 2;
   const workspaceEndRow = rows - 1;
   let visibleWorkspaceCount = 0;
   if (model.workspaces.length === 0) {
