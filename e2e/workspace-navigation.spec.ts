@@ -101,7 +101,34 @@ test("navigates, persists, targets spaces, and moves nested workspaces", async (
       }).toBe(false);
       await expect(childItem()).toHaveCount(0);
     } else {
-      await expect(page.getByRole("button", { name: childActionName })).toBeVisible();
+      await childItem().press("Shift+F10");
+      const agentMenu = page.getByRole("menu", { name: `Agent actions: ${child.name}` });
+      await expect(agentMenu).toBeVisible();
+      await agentMenu.getByRole("menuitem", { name: /Favorite$/ }).click();
+      await expect(childItem()).toHaveAttribute("data-favorite", "true");
+      await expect.poll(async () => {
+        const response = await request.get("/api/bootstrap");
+        const payload = await response.json() as { settings: { favoriteWorkspaceIds: string[] } };
+        return payload.settings.favoriteWorkspaceIds;
+      }).toContain(child.id);
+      await expect.poll(async () => {
+        const childTop = await childItem().evaluate((element) => element.getBoundingClientRect().top);
+        const rootTop = await rootItem().evaluate((element) => element.getBoundingClientRect().top);
+        return childTop < rootTop;
+      }).toBe(true);
+
+      await page.reload();
+      await expect(page.locator("main.app-shell")).toBeVisible({ timeout: 20_000 });
+      await expect(childItem()).toHaveAttribute("data-favorite", "true");
+      await childItem().press("Shift+F10");
+      await expect(agentMenu.getByRole("menuitem", { name: /Unfavorite$/ })).toBeVisible();
+      await agentMenu.getByRole("menuitem", { name: "Close agent" }).click();
+      await expect.poll(async () => {
+        const response = await request.get("/api/bootstrap");
+        const payload = await response.json() as { workspaces: E2eWorkspace[] };
+        return payload.workspaces.some((workspace) => workspace.id === child.id);
+      }).toBe(false);
+      await expect(childItem()).toHaveCount(0);
     }
   } finally {
     await request.delete(`/api/workspaces/${child.id}`);
@@ -124,9 +151,12 @@ test("mobile sidebar opens and activates workspaces by touch", async ({ page, re
   try {
     await page.goto(rootPath);
     await expect(page.locator("main.app-shell")).toBeVisible({ timeout: 20_000 });
-    await expect(mobileActions).toHaveCount(5);
+    await expect(mobileActions).toHaveCount(3);
     await expect(mobileActions.nth(0)).toHaveAccessibleName("Open workspaces and hosts");
-    await expect(mobileActions.nth(1)).toHaveAccessibleName("Open agent fleet");
+    await expect(mobileActions.nth(1)).toHaveAccessibleName("Open chat");
+    await expect(mobileActions.nth(2)).toHaveAccessibleName("Open terminal");
+    await expect(page.getByRole("button", { name: "Open agent fleet" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Open actions" })).toHaveCount(0);
     await navigationToggle.tap();
     await expect(navigation).toBeVisible();
     await expect(
@@ -139,45 +169,78 @@ test("mobile sidebar opens and activates workspaces by touch", async ({ page, re
     await expect(page.getByRole("dialog", { name: "Agent fleet" })).toHaveCount(0);
     await expect(childItem).toHaveAttribute("draggable", "false");
 
+    const routeHistoryLength = await page.evaluate(() => window.history.length);
     await childItem.tap();
     await expect(page).toHaveURL(new RegExp(`${childPath}$`));
     await expect(navigation).toBeHidden();
+    expect(await page.evaluate(() => window.history.length)).toBe(routeHistoryLength);
 
     await navigationToggle.tap();
     await expect(navigation).toBeVisible();
     await rootItem.tap();
     await expect(page).toHaveURL(new RegExp(`${rootPath}$`));
     await expect(navigation).toBeHidden();
-
-    const edgeSwipe = await page.locator(".terminal-pane.active .terminal-host-shell").evaluate((element) => {
-      const shell = element as HTMLElement;
-      const rect = shell.getBoundingClientRect();
-      const dispatch = (type: string, clientX: number, clientY: number) => {
-        const event = new PointerEvent(type, {
-          bubbles: true,
-          cancelable: true,
-          composed: true,
-          pointerId: 91,
-          pointerType: "touch",
-          isPrimary: true,
-          clientX,
-          clientY,
-        });
-        shell.dispatchEvent(event);
-        return event.defaultPrevented;
-      };
-      const startX = rect.left + 2;
-      const startY = rect.top + Math.min(120, rect.height / 2);
-      dispatch("pointerdown", startX, startY);
-      const movePrevented = dispatch("pointermove", startX + 64, startY + 8);
-      const endPrevented = dispatch("pointerup", startX + 64, startY + 8);
-      return { movePrevented, endPrevented };
-    });
-    expect(edgeSwipe).toEqual({ movePrevented: true, endPrevented: true });
-    await expect(navigation).toBeVisible();
+    expect(await page.evaluate(() => window.history.length)).toBe(routeHistoryLength);
   } finally {
     await request.delete(`/api/workspaces/${child.id}`).catch(() => undefined);
     await request.delete(`/api/workspaces/${root.id}`).catch(() => undefined);
+  }
+});
+
+test("desktop agent group menu closes every workspace on its host", async ({ page, request }, testInfo) => {
+  test.skip(testInfo.project.name.startsWith("mobile-"), "desktop-only context menu coverage");
+  const suffix = testInfo.project.name.replaceAll(/[^a-z0-9]+/gi, "-").toLowerCase();
+  const machineId = `agent-group-${suffix}`;
+  const machineName = `Agent Group ${suffix}`;
+  const createdWorkspaceIds: string[] = [];
+
+  try {
+    const registered = await request.post("/api/registry/hosts", {
+      headers: { authorization: "Bearer e2e-registration-token" },
+      data: {
+        machine: {
+          id: machineId,
+          name: machineName,
+          kind: "ssh",
+          port: 1,
+        },
+        ttlMs: 60_000,
+      },
+    });
+    expect(registered.ok()).toBeTruthy();
+    for (let index = 0; index < 2; index += 1) {
+      const response = await request.post("/api/workspaces", { data: { machineId } });
+      expect(response.ok()).toBeTruthy();
+      const workspace = (await response.json() as { workspace: E2eWorkspace }).workspace;
+      createdWorkspaceIds.push(workspace.id);
+    }
+
+    await page.reload();
+    await expect(page.locator("main.app-shell")).toBeVisible({ timeout: 20_000 });
+    const group = page.getByRole("navigation", { name: "Spaces" })
+      .getByRole("button", { name: new RegExp(`^${machineName},`) });
+    await group.focus();
+    await page.keyboard.press("Shift+F10");
+    const groupMenu = page.getByRole("menu", { name: `Agent group actions: ${machineName}` });
+    await expect(groupMenu).toBeVisible();
+    await groupMenu.getByRole("menuitem", { name: "Close all agents (2)" }).click();
+    const confirmMenu = page.getByRole("menu", {
+      name: `Confirm closing 2 agents on ${machineName}`,
+    });
+    await expect(confirmMenu).toContainText("kill their backing sessions");
+    await confirmMenu.getByRole("menuitem", { name: "Confirm close all" }).click();
+
+    await expect.poll(async () => {
+      const response = await request.get("/api/bootstrap");
+      const payload = await response.json() as { workspaces: Array<{ machineId: string }> };
+      return payload.workspaces.filter((workspace) => workspace.machineId === machineId).length;
+    }).toBe(0);
+    createdWorkspaceIds.length = 0;
+  } finally {
+    for (const workspaceId of createdWorkspaceIds.reverse()) {
+      await request.delete(`/api/workspaces/${workspaceId}`).catch(() => undefined);
+    }
+    await request.delete(`/api/registry/hosts/${machineId}`).catch(() => undefined);
   }
 });
 
@@ -201,7 +264,7 @@ test("keeps the loaded UI and recovers when a wake-up bootstrap briefly fails", 
   await expect.poll(() => requests, { timeout: 10_000 }).toBeGreaterThanOrEqual(3);
 });
 
-test("mobile chrome keeps navigation, chat, terminal, and actions reachable", async ({ page }, testInfo) => {
+test("mobile chrome keeps navigation, chat, and terminal reachable", async ({ page }, testInfo) => {
   test.skip(!testInfo.project.name.startsWith("mobile-"), "mobile-only smoke coverage");
   test.setTimeout(60_000);
 
@@ -499,7 +562,7 @@ test("mobile chrome keeps navigation, chat, terminal, and actions reachable", as
   await page.locator("button.mobile-sidebar-close").click();
   await expect(navigation).toBeHidden();
 
-  await chrome.getByRole("button", { name: "Open actions" }).click();
+  await page.keyboard.press("Control+K");
   const commandPalette = page.getByRole("dialog", { name: "Command palette" });
   await expect(commandPalette).toBeVisible();
   await expect(page.locator(".command-item").first()).toContainText("Split right");
@@ -509,7 +572,7 @@ test("mobile chrome keeps navigation, chat, terminal, and actions reachable", as
   await expect(closeTabDialog).toBeVisible();
   await closeTabDialog.getByRole("button", { name: "Cancel" }).click();
 
-  await chrome.getByRole("button", { name: "Open actions" }).click();
+  await page.keyboard.press("Control+K");
   await commandPalette.locator("input").fill("Close current workspace");
   await page.keyboard.press("Enter");
   const closeWorkspaceDialog = page.getByRole("dialog", { name: "Close workspace?" });

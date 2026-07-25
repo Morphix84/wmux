@@ -121,19 +121,13 @@ test("shows three concurrent agents on two machines within one event revision", 
     await expect(page.locator("main.app-shell")).toBeVisible({
       timeout: 20_000,
     });
-    if (testInfo.project.name.startsWith("mobile-")) {
-      await page.getByRole("banner", { name: "Mobile session controls" })
-        .getByRole("button", { name: "Open agent fleet" })
-        .click();
-    } else {
-      await page.keyboard.press("Control+K");
-      const palette = page.getByRole("dialog", { name: "Command palette" });
-      const search = palette.getByPlaceholder(
-        "Search commands, workspaces, tabs, hosts",
-      );
-      await search.fill("Open agent fleet");
-      await search.press("Enter");
-    }
+    await page.keyboard.press("Control+K");
+    const palette = page.getByRole("dialog", { name: "Command palette" });
+    const search = palette.getByPlaceholder(
+      "Search commands, workspaces, tabs, hosts",
+    );
+    await search.fill("Open agent fleet");
+    await search.press("Enter");
 
     const fleet = page.getByRole("dialog", { name: "Agent fleet" });
     await expect(fleet).toBeVisible();

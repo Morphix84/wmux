@@ -1,7 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
+import { resolveE2ePort } from "./e2e/config-port.js";
 import { prepareStandardE2eRuntime } from "./e2e/standard-runtime.js";
 
-const port = 3489;
+const port = resolveE2ePort();
 const externalBaseURL = process.env.WMUX_E2E_BASE_URL?.trim().replace(/\/+$/, "");
 const baseURL = externalBaseURL || `http://127.0.0.1:${port}`;
 const runtime = externalBaseURL ? undefined : prepareStandardE2eRuntime({ baseURL });

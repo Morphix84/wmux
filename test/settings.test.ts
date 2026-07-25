@@ -37,6 +37,7 @@ test("legacy settings migrate while preserving normalized values", () => {
       terminalScrollMode: "batched",
       machineAliases: { local: "Home" },
       collapsedWorkspaceIds: [],
+      favoriteWorkspaceIds: [],
     });
     assert.equal(JSON.parse(fs.readFileSync(filePath, "utf8")).schemaVersion, CURRENT_SETTINGS_SCHEMA_VERSION);
   });
@@ -89,7 +90,20 @@ test("version 1 and version 2 settings migrate to inactive tab suspension", () =
       terminalScrollMode: "batched",
       machineAliases: { local: "Home" },
       collapsedWorkspaceIds: [],
+      favoriteWorkspaceIds: [],
     });
+  });
+});
+
+test("version 6 settings migrate with normalized favorite workspace ids", () => {
+  withTempSettings((filePath) => {
+    fs.writeFileSync(filePath, JSON.stringify({
+      schemaVersion: 6,
+      favoriteWorkspaceIds: ["favorite", "favorite", "", "x".repeat(121), "second"],
+    }));
+    const store = new SettingsStore(filePath);
+    assert.deepEqual(store.snapshot().favoriteWorkspaceIds, ["favorite", "second"]);
+    assert.equal(JSON.parse(fs.readFileSync(filePath, "utf8")).schemaVersion, CURRENT_SETTINGS_SCHEMA_VERSION);
   });
 });
 

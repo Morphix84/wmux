@@ -19,7 +19,13 @@ import { formatSessionReference } from "./session-reference";
 import type { MachineVersionStatus, Workspace, WorkspaceReorderPosition } from "./types";
 import { useOpenTuiTheme, type OpenTuiTheme } from "./color-scheme-context";
 import { WorkspaceMoveDialog } from "./WorkspaceMoveDialog";
-import { remainingWorkspaceRowCount, workspacePointerMovePosition, type WorkspaceAgentStatus, type WorkspaceMoveIntent } from "./workspace-tree";
+import {
+  remainingWorkspaceRowCount,
+  sortFavoriteWorkspaceRows,
+  workspacePointerMovePosition,
+  type WorkspaceAgentStatus,
+  type WorkspaceMoveIntent,
+} from "./workspace-tree";
 
 export interface OpenTuiSidebarWorkspace {
   id: string;
@@ -47,6 +53,8 @@ export interface OpenTuiSidebarWorkspace {
   hiddenBell: boolean;
   hiddenAgentStatus?: WorkspaceAgentStatus;
   canOutdent: boolean;
+  parentId?: string;
+  favorite: boolean;
 }
 
 export interface OpenTuiSidebarMachine {
@@ -85,12 +93,15 @@ interface OpenTuiSidebarProps {
     workspaceId: string,
     returnFocus: HTMLElement | null,
   ) => void;
+  onRequestCloseWorkspaceGroup?: (machineId: string) => void | Promise<void>;
+  onToggleFavoriteWorkspace?: (workspaceId: string) => void | Promise<void>;
   allWorkspaces: Workspace[];
 }
 
 type HitAction =
   | { type: "create-workspace" }
   | { type: "select-space"; machineId: string }
+  | { type: "machine-group"; machineId: string }
   | { type: "workspace"; workspaceId: string; tabId: string }
   | { type: "toggle-workspace"; workspaceId: string }
   | { type: "outdent-workspace"; workspaceId: string };
@@ -146,6 +157,23 @@ interface SemanticSpaceRow {
   rowCount: number;
 }
 
+type SidebarContextMenuState =
+  | {
+    kind: "workspace";
+    x: number;
+    y: number;
+    workspaceId: string;
+    returnFocus: HTMLElement | null;
+  }
+  | {
+    kind: "group";
+    x: number;
+    y: number;
+    machineId: string;
+    confirmCloseAll: boolean;
+    returnFocus: HTMLElement | null;
+  };
+
 export function OpenTuiSidebar({
   containerRef,
   className,
@@ -165,6 +193,8 @@ export function OpenTuiSidebar({
   pointerReorderDisabled = false,
   workspaceActions = false,
   onRequestCloseWorkspace,
+  onRequestCloseWorkspaceGroup,
+  onToggleFavoriteWorkspace,
   allWorkspaces,
 }: OpenTuiSidebarProps) {
   const theme = useOpenTuiTheme();
@@ -174,7 +204,9 @@ export function OpenTuiSidebar({
   const [moveWorkspace, setMoveWorkspace] = useState<{ workspaceId: string; returnFocus: HTMLElement | null } | null>(null);
   const [semanticRows, setSemanticRows] = useState<SemanticWorkspaceRow[]>([]);
   const [semanticSpaces, setSemanticSpaces] = useState<SemanticSpaceRow[]>([]);
+  const [contextMenu, setContextMenu] = useState<SidebarContextMenuState | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const hitsRef = useRef<HitZone[]>([]);
   const metricsRef = useRef<CellMetrics>({ width: 8, height: 16, cols: 1, rows: 1 });
   const paintRef = useRef<(() => void) | null>(null);
@@ -187,6 +219,11 @@ export function OpenTuiSidebar({
   } | null>(null);
   const suppressClickRef = useRef(false);
   const hasRunningWorkspace = workspaces.some((workspace) => workspace.agentStatus === "running");
+  const contextMenuEnabled = Boolean(
+    onRequestCloseWorkspace
+    && onRequestCloseWorkspaceGroup
+    && onToggleFavoriteWorkspace,
+  );
 
   useEffect(() => {
     setWorkspaceScrollOffset((value) => Math.min(value, Math.max(0, workspaces.length - 1)));
@@ -249,6 +286,39 @@ export function OpenTuiSidebar({
     };
   }, [theme]);
 
+  useEffect(() => {
+    if (!contextMenu) return;
+    const returnFocus = contextMenu.returnFocus;
+    const focusFrame = window.requestAnimationFrame(() => {
+      contextMenuRef.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus({ preventScroll: true });
+    });
+    const closeOnPointerDown = (event: PointerEvent) => {
+      if (contextMenuRef.current?.contains(event.target as Node)) return;
+      setContextMenu(null);
+    };
+    const closeOnKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      setContextMenu(null);
+    };
+    const close = () => setContextMenu(null);
+    document.addEventListener("pointerdown", closeOnPointerDown, true);
+    document.addEventListener("keydown", closeOnKeyDown, true);
+    window.addEventListener("blur", close);
+    window.addEventListener("resize", close);
+    window.addEventListener("scroll", close, true);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      document.removeEventListener("pointerdown", closeOnPointerDown, true);
+      document.removeEventListener("keydown", closeOnKeyDown, true);
+      window.removeEventListener("blur", close);
+      window.removeEventListener("resize", close);
+      window.removeEventListener("scroll", close, true);
+      if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
+    };
+  }, [contextMenu]);
+
   const hitAt = (clientX: number, clientY: number): HitZone | undefined => {
     const canvas = canvasRef.current;
     if (!canvas) return undefined;
@@ -256,6 +326,42 @@ export function OpenTuiSidebar({
     const row = Math.floor((clientY - rect.top) / metricsRef.current.height);
     const col = Math.floor((clientX - rect.left) / metricsRef.current.width);
     return hitsRef.current.find((candidate) => candidate.row === row && col >= candidate.col && col < candidate.col + candidate.width);
+  };
+
+  const contextMenuPosition = (clientX: number, clientY: number) => ({
+    x: Math.max(8, Math.min(clientX, window.innerWidth - 280)),
+    y: Math.max(8, Math.min(clientY, window.innerHeight - 220)),
+  });
+
+  const openWorkspaceContextMenu = (
+    workspaceId: string,
+    clientX: number,
+    clientY: number,
+    returnFocus: HTMLElement | null,
+  ) => {
+    if (!contextMenuEnabled) return;
+    setContextMenu({
+      kind: "workspace",
+      ...contextMenuPosition(clientX, clientY),
+      workspaceId,
+      returnFocus,
+    });
+  };
+
+  const openGroupContextMenu = (
+    machineId: string,
+    clientX: number,
+    clientY: number,
+    returnFocus: HTMLElement | null,
+  ) => {
+    if (!contextMenuEnabled) return;
+    setContextMenu({
+      kind: "group",
+      ...contextMenuPosition(clientX, clientY),
+      machineId,
+      confirmCloseAll: false,
+      returnFocus,
+    });
   };
 
   const onClick = (event: React.MouseEvent<HTMLCanvasElement>) => {
@@ -272,6 +378,18 @@ export function OpenTuiSidebar({
     if (hit.action.type === "workspace") onActivateWorkspace(hit.action.workspaceId, hit.action.tabId);
     if (hit.action.type === "toggle-workspace") void onToggleWorkspace(hit.action.workspaceId);
     if (hit.action.type === "outdent-workspace" && !movesDisabled) void onReorderWorkspace(hit.action.workspaceId, undefined, "out-of");
+  };
+
+  const onContextMenu = (event: React.MouseEvent<HTMLCanvasElement>) => {
+    const hit = hitAt(event.clientX, event.clientY);
+    if (!hit || (hit.action.type !== "workspace" && hit.action.type !== "machine-group")) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (hit.action.type === "workspace") {
+      openWorkspaceContextMenu(hit.action.workspaceId, event.clientX, event.clientY, event.currentTarget);
+    } else {
+      openGroupContextMenu(hit.action.machineId, event.clientX, event.clientY, event.currentTarget);
+    }
   };
 
   const onPointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
@@ -408,6 +526,7 @@ export function OpenTuiSidebar({
           ref={canvasRef}
           className="open-tui-canvas"
           onClick={onClick}
+          onContextMenu={onContextMenu}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={finishWorkspaceDrag}
@@ -429,6 +548,17 @@ export function OpenTuiSidebar({
                 aria-current={machine.id === targetMachineId ? "true" : undefined}
                 aria-label={`${machine.name}, ${machine.reachable ? "online" : "offline"}, ${machine.workspaceCount} ${machine.workspaceCount === 1 ? "agent session" : "agent sessions"}`}
                 onClick={() => onTargetMachineChange(machine.id)}
+                onContextMenu={(event) => {
+                  if (!contextMenuEnabled) return;
+                  event.preventDefault();
+                  openGroupContextMenu(machine.id, event.clientX, event.clientY, event.currentTarget);
+                }}
+                onKeyDown={(event) => {
+                  if (!contextMenuEnabled || (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10"))) return;
+                  event.preventDefault();
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  openGroupContextMenu(machine.id, rect.left + 12, rect.top + 12, event.currentTarget);
+                }}
               />
             ))}
           </nav>
@@ -450,13 +580,25 @@ export function OpenTuiSidebar({
                 aria-level={workspace.depth + 1}
                 aria-current={workspace.active ? "page" : undefined}
                 aria-expanded={workspace.hasChildren ? workspace.expanded : undefined}
-                aria-label={`${workspace.title}${workspace.agentCreated ? `, created by ${workspace.agentName ?? "an agent"}` : ""}${workspace.hiddenUnreadCount ? `, ${workspace.hiddenUnreadCount} hidden unread` : ""}${workspace.hiddenAgentStatus ? `, hidden descendant agent status ${workspace.hiddenAgentStatus}` : ""}`}
+                aria-label={`${workspace.title}${workspace.favorite ? ", favorite" : ""}${workspace.agentCreated ? `, created by ${workspace.agentName ?? "an agent"}` : ""}${workspace.hiddenUnreadCount ? `, ${workspace.hiddenUnreadCount} hidden unread` : ""}${workspace.hiddenAgentStatus ? `, hidden descendant agent status ${workspace.hiddenAgentStatus}` : ""}`}
                 data-agent-created={workspace.agentCreated ? "true" : undefined}
+                data-favorite={workspace.favorite ? "true" : "false"}
                 draggable={!pointerReorderDisabled && !movesDisabled}
                 onClick={(event) => {
                   if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
                   event.preventDefault();
                   onActivateWorkspace(workspace.id, workspace.tabId);
+                }}
+                onContextMenu={(event) => {
+                  if (!contextMenuEnabled) return;
+                  event.preventDefault();
+                  openWorkspaceContextMenu(workspace.id, event.clientX, event.clientY, event.currentTarget);
+                }}
+                onKeyDown={(event) => {
+                  if (!contextMenuEnabled || (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10"))) return;
+                  event.preventDefault();
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  openWorkspaceContextMenu(workspace.id, rect.left + 20, rect.top + 12, event.currentTarget);
                 }}
               />
               {workspace.hasChildren ? (
@@ -487,7 +629,7 @@ export function OpenTuiSidebar({
           onClose={() => setMoveWorkspace(null)}
           onMove={(intent: WorkspaceMoveIntent) => onReorderWorkspace(intent.workspaceId, intent.targetWorkspaceId, intent.position)}
           allowMove={!movesDisabled}
-          onRequestClose={onRequestCloseWorkspace
+          onRequestClose={workspaceActions && onRequestCloseWorkspace
             ? (workspaceId) => onRequestCloseWorkspace(
               workspaceId,
               moveWorkspace.returnFocus,
@@ -495,7 +637,154 @@ export function OpenTuiSidebar({
             : undefined}
         />
       ) : null}
+      {contextMenu ? (
+        <SidebarContextMenu
+          menuRef={contextMenuRef}
+          state={contextMenu}
+          workspaces={workspaces}
+          machines={machines}
+          onClose={() => setContextMenu(null)}
+          onConfirmGroup={() => {
+            if (contextMenu.kind !== "group") return;
+            setContextMenu({ ...contextMenu, confirmCloseAll: true });
+          }}
+          onToggleFavorite={(workspaceId) => {
+            setContextMenu(null);
+            void onToggleFavoriteWorkspace?.(workspaceId);
+          }}
+          onCloseWorkspace={(workspaceId) => {
+            const returnFocus = contextMenu.returnFocus;
+            setContextMenu(null);
+            onRequestCloseWorkspace?.(workspaceId, returnFocus);
+          }}
+          onCloseGroup={(machineId) => {
+            setContextMenu(null);
+            void onRequestCloseWorkspaceGroup?.(machineId);
+          }}
+        />
+      ) : null}
     </aside>
+  );
+}
+
+function SidebarContextMenu({
+  menuRef,
+  state,
+  workspaces,
+  machines,
+  onClose,
+  onConfirmGroup,
+  onToggleFavorite,
+  onCloseWorkspace,
+  onCloseGroup,
+}: {
+  menuRef: Ref<HTMLDivElement>;
+  state: SidebarContextMenuState;
+  workspaces: OpenTuiSidebarWorkspace[];
+  machines: OpenTuiSidebarMachine[];
+  onClose: () => void;
+  onConfirmGroup: () => void;
+  onToggleFavorite: (workspaceId: string) => void;
+  onCloseWorkspace: (workspaceId: string) => void;
+  onCloseGroup: (machineId: string) => void;
+}) {
+  const workspace = state.kind === "workspace"
+    ? workspaces.find((candidate) => candidate.id === state.workspaceId)
+    : undefined;
+  const machine = state.kind === "group"
+    ? machines.find((candidate) => candidate.id === state.machineId)
+    : undefined;
+  const groupCount = state.kind === "group"
+    ? machine?.workspaceCount ?? workspaces.filter((candidate) => candidate.machineId === state.machineId).length
+    : 0;
+  const label = state.kind === "workspace"
+    ? `Agent actions: ${workspace?.title ?? "removed agent"}`
+    : state.confirmCloseAll
+      ? `Confirm closing ${groupCount} agents on ${machine?.name ?? state.machineId}`
+      : `Agent group actions: ${machine?.name ?? state.machineId}`;
+  return (
+    <div
+      ref={menuRef}
+      className={`sidebar-context-menu${state.kind === "group" && state.confirmCloseAll ? " confirm" : ""}`}
+      style={{ left: state.x, top: state.y }}
+      role="menu"
+      aria-label={label}
+      onContextMenu={(event) => event.preventDefault()}
+      onKeyDown={(event) => {
+        if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+        const items = [...event.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")];
+        if (items.length === 0) return;
+        const currentIndex = items.indexOf(document.activeElement as HTMLButtonElement);
+        const nextIndex = event.key === "Home"
+          ? 0
+          : event.key === "End"
+            ? items.length - 1
+            : event.key === "ArrowUp"
+              ? (currentIndex <= 0 ? items.length - 1 : currentIndex - 1)
+              : (currentIndex + 1) % items.length;
+        event.preventDefault();
+        items[nextIndex]?.focus();
+      }}
+    >
+      <div className="sidebar-context-menu-heading">
+        <span>{state.kind === "workspace" ? "// AGENT" : "// AGENT GROUP"}</span>
+        <strong>{workspace?.title ?? machine?.name ?? "Unavailable"}</strong>
+      </div>
+      {state.kind === "workspace" ? (
+        <>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!workspace}
+            onClick={() => workspace && onToggleFavorite(workspace.id)}
+          >
+            <span aria-hidden="true">{workspace?.favorite ? "[☆]" : "[★]"}</span>
+            {workspace?.favorite ? "Unfavorite" : "Favorite"}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="danger"
+            disabled={!workspace}
+            onClick={() => workspace && onCloseWorkspace(workspace.id)}
+          >
+            <span aria-hidden="true">[X]</span>
+            Close agent
+          </button>
+        </>
+      ) : state.confirmCloseAll ? (
+        <>
+          <p>
+            Close {groupCount} {groupCount === 1 ? "agent" : "agents"} and kill their backing sessions?
+          </p>
+          <button type="button" role="menuitem" onClick={onClose}>
+            <span aria-hidden="true">[ESC]</span>
+            Cancel
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="danger"
+            disabled={groupCount === 0}
+            onClick={() => onCloseGroup(state.machineId)}
+          >
+            <span aria-hidden="true">[X]</span>
+            Confirm close all
+          </button>
+        </>
+      ) : (
+        <button
+          type="button"
+          role="menuitem"
+          className="danger"
+          disabled={groupCount === 0}
+          onClick={onConfirmGroup}
+        >
+          <span aria-hidden="true">[XX]</span>
+          Close all agents ({groupCount})
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -652,32 +941,49 @@ const drawSidebarGrid = (
     write(row, 3, "NO AGENT SESSIONS", rgba.faint, 700);
     row += 2;
   } else {
-    const remainingWorkspaces = model.workspaces.slice(model.workspaceScrollOffset);
+    const allGroupedWorkspaces = new Map<string, OpenTuiSidebarWorkspace[]>();
+    for (const workspace of model.workspaces) {
+      const group = allGroupedWorkspaces.get(workspace.machineId) ?? [];
+      group.push(workspace);
+      allGroupedWorkspaces.set(workspace.machineId, group);
+    }
+    const allOrderedMachineIds = [
+      ...model.machines.map((machine) => machine.id),
+      ...allGroupedWorkspaces.keys(),
+    ].filter((machineId, index, machineIds) =>
+      allGroupedWorkspaces.has(machineId) && machineIds.indexOf(machineId) === index);
+    const orderedWorkspaces = allOrderedMachineIds.flatMap((machineId) =>
+      sortFavoriteWorkspaceRows(allGroupedWorkspaces.get(machineId) ?? []));
+    const remainingWorkspaces = orderedWorkspaces.slice(model.workspaceScrollOffset);
     const groupedWorkspaces = new Map<string, OpenTuiSidebarWorkspace[]>();
     for (const workspace of remainingWorkspaces) {
       const group = groupedWorkspaces.get(workspace.machineId) ?? [];
       group.push(workspace);
       groupedWorkspaces.set(workspace.machineId, group);
     }
-    const orderedMachineIds = [
-      ...model.machines.map((machine) => machine.id),
-      ...groupedWorkspaces.keys(),
-    ].filter((machineId, index, machineIds) =>
-      groupedWorkspaces.has(machineId) && machineIds.indexOf(machineId) === index);
+    const orderedMachineIds = allOrderedMachineIds.filter((machineId) => groupedWorkspaces.has(machineId));
 
     groupLoop:
     for (const machineId of orderedMachineIds) {
       const machineWorkspaces = groupedWorkspaces.get(machineId) ?? [];
       if (row + 3 >= workspaceEndRow) break;
       const machine = model.machines.find((candidate) => candidate.id === machineId);
-      const groupActiveCount = machineWorkspaces.filter((workspace) =>
+      const groupWorkspaceCount = machine?.workspaceCount ?? machineWorkspaces.length;
+      const groupActiveCount = machine?.activeAgentCount ?? machineWorkspaces.filter((workspace) =>
         workspace.agentStatus === "running" || workspace.agentStatus === "waiting").length;
       const groupCountLabel = groupActiveCount > 0
-        ? `${machineWorkspaces.length}/${groupActiveCount}`
-        : String(machineWorkspaces.length);
+        ? `${groupWorkspaceCount}/${groupActiveCount}`
+        : String(groupWorkspaceCount);
       write(row, 2, machineId === model.targetMachineId ? ">" : " ", machineId === model.targetMachineId ? rgba.gold : rgba.faint, 700);
       write(row, 4, (machine?.name ?? machineWorkspaces[0]?.host ?? machineId).toUpperCase(), machineId === model.targetMachineId ? rgba.goldDim : rgba.faint, 700);
       write(row, Math.max(10, cols - groupCountLabel.length - 1), groupCountLabel, groupActiveCount > 0 ? rgba.goldDim : rgba.faint, 700);
+      actionCells(
+        row,
+        0,
+        cols,
+        `Agent group actions for ${machine?.name ?? machineId}`,
+        { type: "machine-group", machineId },
+      );
       row++;
 
       for (const workspace of machineWorkspaces) {
@@ -718,8 +1024,12 @@ const drawSidebarGrid = (
           actionCells(row, 3 + indent, 1, workspace.expanded ? `Collapse ${workspace.title}` : `Expand ${workspace.title}`, { type: "toggle-workspace", workspaceId: workspace.id });
         }
         write(row, 5 + indent, statusMarker, statusColor, 700);
-        const titleCol = workspace.agentCreated ? 10 + indent : 7 + indent;
+        let titleCol = workspace.agentCreated ? 10 + indent : 7 + indent;
         if (workspace.agentCreated) write(row, 7 + indent, "AI", rgba.agent, 700);
+        if (workspace.favorite) {
+          write(row, titleCol, "★", rgba.gold, 700);
+          titleCol += 2;
+        }
         const aggregateUnread = workspace.unreadCount + workspace.hiddenUnreadCount;
         const unreadText = aggregateUnread > 0 ? `(${aggregateUnread}${workspace.hiddenUnreadCount ? "*" : ""})` : "";
         const versionText = workspace.versionStatus === "outdated" && workspace.versionLabel

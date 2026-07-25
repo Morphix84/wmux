@@ -212,6 +212,46 @@ export const pruneCollapsedWorkspaceIds = (
   return collapsedWorkspaceIds.filter((id, index) => validIds.has(id) && collapsedWorkspaceIds.indexOf(id) === index);
 };
 
+export const pruneFavoriteWorkspaceIds = (
+  workspaces: readonly Workspace[],
+  favoriteWorkspaceIds: readonly string[],
+): string[] => {
+  const validIds = new Set(workspaces.map((workspace) => workspace.id));
+  return favoriteWorkspaceIds.filter((id, index) => validIds.has(id) && favoriteWorkspaceIds.indexOf(id) === index);
+};
+
+export const sortFavoriteWorkspaceRows = <
+  T extends { id: string; parentId?: string; favorite: boolean },
+>(rows: readonly T[]): T[] => {
+  const rowById = new Map(rows.map((row) => [row.id, row]));
+  const childrenByParentId = new Map<string | undefined, T[]>();
+  for (const row of rows) {
+    const parentId = row.parentId && row.parentId !== row.id && rowById.has(row.parentId)
+      ? row.parentId
+      : undefined;
+    const siblings = childrenByParentId.get(parentId) ?? [];
+    siblings.push(row);
+    childrenByParentId.set(parentId, siblings);
+  }
+  const favoriteFirst = (siblings: readonly T[]): T[] =>
+    siblings
+      .map((row, index) => ({ row, index }))
+      .sort((left, right) =>
+        Number(right.row.favorite) - Number(left.row.favorite) || left.index - right.index)
+      .map(({ row }) => row);
+  const sorted: T[] = [];
+  const visited = new Set<string>();
+  const visit = (row: T) => {
+    if (visited.has(row.id)) return;
+    visited.add(row.id);
+    sorted.push(row);
+    for (const child of favoriteFirst(childrenByParentId.get(row.id) ?? [])) visit(child);
+  };
+  for (const root of favoriteFirst(childrenByParentId.get(undefined) ?? [])) visit(root);
+  for (const row of favoriteFirst(rows)) visit(row);
+  return sorted;
+};
+
 export const workspaceMoveIntents = (
   workspaces: readonly Workspace[],
   workspaceId: string,
@@ -265,6 +305,23 @@ export const rebaseCollapsedWorkspaceIds = <T extends { settings: { collapsedWor
     settings: {
       ...state.settings,
       collapsedWorkspaceIds: [...desiredCollapsedWorkspaceIds],
+    },
+  };
+};
+
+export const rebaseFavoriteWorkspaceIds = <T extends { settings: { favoriteWorkspaceIds?: string[] } }>(
+  state: T,
+  desiredFavoriteWorkspaceIds: readonly string[] | null,
+): T => {
+  if (
+    desiredFavoriteWorkspaceIds === null
+    || sameWorkspaceIds(state.settings.favoriteWorkspaceIds ?? [], desiredFavoriteWorkspaceIds)
+  ) return state;
+  return {
+    ...state,
+    settings: {
+      ...state.settings,
+      favoriteWorkspaceIds: [...desiredFavoriteWorkspaceIds],
     },
   };
 };

@@ -12,6 +12,7 @@ import {
   parseRouteTarget,
   saveActivePaneSelections,
   saveActiveTabSelections,
+  shouldReplaceWorkspaceHistory,
   workspaceTabPath,
 } from "./route-state";
 import type { BootstrapPayload, SurfaceTab, Workspace } from "./types";
@@ -79,7 +80,8 @@ export function useAppRouting(options: UseAppRoutingOptions) {
 
       const nextPath = workspaceTabPath(workspaceId, target.tab.id);
       if (currentChromePath() !== nextPath) {
-        window.history[activateOptions.replaceHistory ? "replaceState" : "pushState"](null, "", nextPath);
+        const replaceHistory = shouldReplaceWorkspaceHistory(isMobile, activateOptions.replaceHistory);
+        window.history[replaceHistory ? "replaceState" : "pushState"](null, "", nextPath);
         lastSyncedPath.current = nextPath;
       }
       if (isMobile) onMobileNavigate();

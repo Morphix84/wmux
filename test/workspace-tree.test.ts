@@ -5,8 +5,11 @@ import {
   deriveWorkspaceTree,
   expandWorkspaceAncestors,
   pruneCollapsedWorkspaceIds,
+  pruneFavoriteWorkspaceIds,
   rebaseCollapsedWorkspaceIds,
+  rebaseFavoriteWorkspaceIds,
   remainingWorkspaceRowCount,
+  sortFavoriteWorkspaceRows,
   workspaceMoveIntents,
   workspacePointerMovePosition,
 } from "../src/client/src/workspace-tree.ts";
@@ -87,4 +90,43 @@ test("pending collapse intent rebases stale incoming settings", () => {
   assert.notEqual(rebased, state);
   assert.equal(rebaseCollapsedWorkspaceIds(rebased, null), rebased);
   assert.equal(rebaseCollapsedWorkspaceIds(rebased, ["root", "child"]), rebased);
+});
+
+test("favorite rows sort sibling subtrees without separating children from parents", () => {
+  const rows = [
+    { id: "root-a", favorite: false },
+    { id: "child-a", parentId: "root-a", favorite: false },
+    { id: "child-b", parentId: "root-a", favorite: true },
+    { id: "grandchild", parentId: "child-b", favorite: false },
+    { id: "root-b", favorite: true },
+  ];
+  assert.deepEqual(
+    sortFavoriteWorkspaceRows(rows).map((row) => row.id),
+    ["root-b", "root-a", "child-b", "grandchild", "child-a"],
+  );
+});
+
+test("favorite workspace ids prune and rebase independently from collapse state", () => {
+  assert.deepEqual(
+    pruneFavoriteWorkspaceIds(workspaces, ["grandchild", "missing", "grandchild", "root"]),
+    ["grandchild", "root"],
+  );
+  const state = {
+    revision: 5,
+    settings: {
+      collapsedWorkspaceIds: ["root"],
+      favoriteWorkspaceIds: ["old"],
+    },
+  };
+  const rebased = rebaseFavoriteWorkspaceIds(state, ["child"]);
+  assert.deepEqual(rebased.settings, {
+    collapsedWorkspaceIds: ["root"],
+    favoriteWorkspaceIds: ["child"],
+  });
+  assert.equal(rebased.revision, 5);
+  const legacyState = { revision: 4, settings: { collapsedWorkspaceIds: ["root"] } };
+  assert.deepEqual(
+    rebaseFavoriteWorkspaceIds(legacyState, ["child"]).settings.favoriteWorkspaceIds,
+    ["child"],
+  );
 });
