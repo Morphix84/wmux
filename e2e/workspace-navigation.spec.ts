@@ -1,6 +1,6 @@
 import { createNestedWorkspacePair, expect, test, type E2eWorkspace } from "./fixtures";
 
-test("navigates, persists, filters, and moves nested workspaces", async ({ page, request }, testInfo) => {
+test("navigates, persists, targets spaces, and moves nested workspaces", async ({ page, request }, testInfo) => {
   test.setTimeout(60_000);
   const { child, root } = await createNestedWorkspacePair(request);
   const rootPath = `/workspaces/${root.id}/tabs/${root.activeTabId}`;
@@ -83,7 +83,11 @@ test("navigates, persists, filters, and moves nested workspaces", async ({ page,
     if (isMobile) {
       await page.getByRole("combobox", { name: "Filter workspace list by host" }).selectOption("local");
     } else {
-      await page.getByRole("button", { name: /^Workspace host filter:/ }).press("Enter");
+      const spaces = page.getByRole("navigation", { name: "Spaces" });
+      const agents = page.getByRole("tree", { name: "Agents" });
+      await expect(spaces.getByRole("button", { name: /^Local,/ })).toHaveAttribute("aria-current", "true");
+      await expect(agents).toHaveAttribute("data-grouping", "space");
+      await expect(agents).toHaveAttribute("data-target-space-id", "local");
     }
     await expect(rootItem()).toBeVisible();
     await expect(childItem()).toBeVisible();
@@ -101,7 +105,7 @@ test("navigates, persists, filters, and moves nested workspaces", async ({ page,
       }).toBe(false);
       await expect(childItem()).toHaveCount(0);
     } else {
-      await expect(page.getByRole("button", { name: childActionName })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: childActionName })).toBeVisible();
     }
   } finally {
     await request.delete(`/api/workspaces/${child.id}`);
