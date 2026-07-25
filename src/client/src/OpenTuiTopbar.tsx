@@ -203,10 +203,10 @@ const drawTopbar = (
 
   let col = 1;
   for (const tab of props.tabs) {
-    const label = `${tab.active ? ">" : " "} ${tab.title}${tab.unreadCount > 0 ? ` (${tab.unreadCount})` : ""}`;
+    const label = `${tab.title}${tab.unreadCount > 0 ? ` (${tab.unreadCount})` : ""}`;
     const width = Math.min(Math.max(12, label.length + 2), 24);
-    fill(row, col, width, tab.active ? rgba.active : rgba.panel);
-    write(row, col + 1, label, tab.active ? rgba.gold : rgba.text, tab.active ? 700 : 600);
+    fill(row, col, width, tab.active ? rgba.selection : rgba.panel);
+    write(row, col + 1, label, tab.active ? rgba.selectionText : rgba.text, tab.active ? 700 : 600);
     hit(row, col, width, `Activate ${tab.title}`, { type: "tab", tabId: tab.id });
     col += width + 1;
     if (col > cols - (compactActions ? 46 : 78)) break;

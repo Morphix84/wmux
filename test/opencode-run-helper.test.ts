@@ -154,8 +154,17 @@ while True:
   let helperClosed = false;
   try {
     helper.stdin.end(input);
-    await waitFor(() => fs.existsSync(ready), 5_000, "fake OpenCode child did not report readiness");
-    childPid = (JSON.parse(fs.readFileSync(ready, "utf8")) as { pid: number }).pid;
+    await waitFor(() => {
+      try {
+        const payload = JSON.parse(fs.readFileSync(ready, "utf8")) as { pid?: unknown };
+        if (!Number.isSafeInteger(payload.pid) || (payload.pid as number) <= 0) return false;
+        childPid = payload.pid as number;
+        return true;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT" || error instanceof SyntaxError) return false;
+        throw error;
+      }
+    }, 5_000, "fake OpenCode child did not report readiness");
     const closed = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error("helper did not exit after SIGTERM")), 6_000);
       helper.once("close", (code, signalName) => {

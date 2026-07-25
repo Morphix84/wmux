@@ -22,6 +22,8 @@ test("color schemes provide complete terminal and chrome palettes", () => {
     const variables = colorSchemeCssVariables(scheme);
     assert.equal(variables["--black"], scheme.terminal.background);
     assert.equal(variables["--gold"], scheme.chrome.gold);
+    assert.equal(variables["--selection"], scheme.chrome.selection);
+    assert.equal(variables["--selection-text"], scheme.chrome.selectionText);
     assert.equal(variables["--terminal-background"], scheme.terminal.background);
     assert.equal(variables["--terminal-foreground"], scheme.terminal.foreground);
     assert.equal(variables["--wmux-browser-chrome"], scheme.terminal.background);

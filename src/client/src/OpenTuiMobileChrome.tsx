@@ -39,7 +39,7 @@ type MobileChromeRenderModel = Pick<
   "workspaceName" | "subtitle" | "status" | "statusLabel" | "versionStatus" | "versionLabel" | "versionDetail" | "serviceConnection" | "surfaceMode" | "navigationOpen"
 > & { animationTick: number };
 
-const runningFrames = ["|", "/", "-", "\\"];
+const runningFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const mobileActionHeight = 44;
 
 export function OpenTuiMobileChrome(props: OpenTuiMobileChromeProps) {
@@ -230,9 +230,15 @@ const drawMobileChrome = (
   labels.forEach((label, index) => {
     const active = label.endsWith("*");
     const width = widths[index];
-    fillRows(actionRow, actionRowCount, col, width, active ? rgba.active : rgba.panel);
+    fillRows(actionRow, actionRowCount, col, width, active ? rgba.selection : rgba.panel);
     const labelRow = Math.min(rows - 1, actionRow + Math.floor(actionRowCount / 2));
-    write(labelRow, col + Math.max(1, Math.floor((width - label.length) / 2)), label, active ? rgba.gold : rgba.text, active);
+    write(
+      labelRow,
+      col + Math.max(1, Math.floor((width - label.length) / 2)),
+      label,
+      active ? rgba.selectionText : rgba.text,
+      active,
+    );
     col += width + gap;
   });
   return grid;

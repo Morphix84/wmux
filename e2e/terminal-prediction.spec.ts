@@ -443,6 +443,106 @@ test("prediction layout crosses a wrapped row and confirms without residue", asy
   }
 });
 
+test("renders Unicode quadrant blocks as exact cell geometry", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "canvas block rendering coverage");
+  await page.goto("/");
+  await expect(page.locator("main.app-shell")).toBeVisible({ timeout: 20_000 });
+  const projectRoot = process.cwd().replaceAll("\\", "/");
+  const ghosttyUrl = `/@fs${path.posix.join(projectRoot, "node_modules/ghostty-web/dist/ghostty-web.es.js")}`;
+  const result = await page.evaluate(async ({ ghosttyUrl }) => {
+    const { CanvasRenderer } = await import(new URL(ghosttyUrl, window.location.href).href);
+    const foreground = [202, 124, 94] as const;
+    const background = [26, 27, 37] as const;
+    const canvas = document.createElement("canvas");
+    const cell = (codepoint: number) => ({
+      codepoint,
+      fg_r: foreground[0],
+      fg_g: foreground[1],
+      fg_b: foreground[2],
+      bg_r: 0,
+      bg_g: 0,
+      bg_b: 0,
+      fgIsDefault: false,
+      bgIsDefault: true,
+      flags: 0,
+      width: 1,
+      hyperlink_id: 0,
+      grapheme_len: 0,
+    });
+    const cells = [cell(0x2597), cell(0x2596)];
+    const dpr = 2;
+    const renderer = new CanvasRenderer(canvas, {
+      fontSize: 14,
+      fontFamily: '"Fira Code", monospace',
+      cursorBlink: false,
+      devicePixelRatio: dpr,
+      theme: {
+        foreground: `rgb(${foreground.join(", ")})`,
+        background: `rgb(${background.join(", ")})`,
+      },
+    });
+    renderer.resize(2, 1);
+    renderer.render({
+      getLine: () => cells,
+      getViewport: () => cells,
+      getCursor: () => ({ x: 0, y: 0, visible: false }),
+      getDimensions: () => ({ cols: 2, rows: 1 }),
+      isRowDirty: () => true,
+      clearDirty: () => undefined,
+    }, true);
+
+    const metrics = renderer.getMetrics();
+    const context = canvas.getContext("2d", { willReadFrequently: true })!;
+    const stats = cells.map((_, col) => {
+      const left = Math.round(col * metrics.width * dpr);
+      const right = Math.round((col + 1) * metrics.width * dpr);
+      const bottom = Math.round(metrics.height * dpr);
+      const pixels = context.getImageData(left, 0, right - left, bottom).data;
+      let foregroundPixels = 0;
+      let backgroundPixels = 0;
+      let blendedPixels = 0;
+      for (let offset = 0; offset < pixels.length; offset += 4) {
+        const rgb = [pixels[offset], pixels[offset + 1], pixels[offset + 2]];
+        if (rgb.every((value, index) => value === foreground[index])) {
+          foregroundPixels += 1;
+        } else if (rgb.every((value, index) => value === background[index])) {
+          backgroundPixels += 1;
+        } else {
+          blendedPixels += 1;
+        }
+      }
+      return { foregroundPixels, backgroundPixels, blendedPixels };
+    });
+    const cellWidth = Math.round(metrics.width * dpr);
+    const cellHeight = Math.round(metrics.height * dpr);
+    const leftHalf = Math.round(metrics.width / 2) * dpr;
+    const rightHalf = cellWidth - leftHalf;
+    const topHalf = Math.round(metrics.height / 2) * dpr;
+    const bottomHalf = cellHeight - topHalf;
+    return {
+      stats,
+      expectedForegroundPixels: [rightHalf * bottomHalf, leftHalf * bottomHalf],
+      expectedBackgroundPixels: [
+        cellWidth * cellHeight - rightHalf * bottomHalf,
+        cellWidth * cellHeight - leftHalf * bottomHalf,
+      ],
+    };
+  }, { ghosttyUrl });
+
+  expect(result.stats).toEqual([
+    {
+      foregroundPixels: result.expectedForegroundPixels[0],
+      backgroundPixels: result.expectedBackgroundPixels[0],
+      blendedPixels: 0,
+    },
+    {
+      foregroundPixels: result.expectedForegroundPixels[1],
+      backgroundPixels: result.expectedBackgroundPixels[1],
+      blendedPixels: 0,
+    },
+  ]);
+});
+
 test("mobile WebKit prediction ink matches Ghostty canvas metrics", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile-webkit", "mobile WebKit coverage");
   test.setTimeout(75_000);
@@ -454,9 +554,9 @@ test("mobile WebKit prediction ink matches Ghostty canvas metrics", async ({ pag
   const predictionUrl = `/@fs${path.posix.join(projectRoot, "src/client/src/terminal-prediction-renderer.ts")}`;
   const inputPredictionUrl = `/@fs${path.posix.join(projectRoot, "src/client/src/terminal-input-prediction.ts")}`;
   const result = await page.evaluate(async ({ ghosttyUrl, predictionUrl, inputPredictionUrl }) => {
-    const ghostty = await import(ghosttyUrl);
-    const predictionModule = await import(predictionUrl);
-    const inputPrediction = await import(inputPredictionUrl);
+    const ghostty = await import(new URL(ghosttyUrl, window.location.href).href);
+    const predictionModule = await import(new URL(predictionUrl, window.location.href).href);
+    const inputPrediction = await import(new URL(inputPredictionUrl, window.location.href).href);
     const host = document.createElement("div");
     host.style.position = "relative";
     host.style.width = "320px";

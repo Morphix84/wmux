@@ -1,7 +1,7 @@
 import { expect, test } from "./fixtures";
 
 test("publishes standalone app metadata for direct workspace routes", async ({ page, request }) => {
-  await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute("content", "#101114");
+  await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute("content", "#0c0d0f");
   await expect(page.locator('meta[name="mobile-web-app-capable"]')).toHaveAttribute("content", "yes");
   await expect(page.locator('meta[name="apple-mobile-web-app-capable"]')).toHaveAttribute("content", "yes");
   await expect(page.locator('meta[name="apple-mobile-web-app-status-bar-style"]')).toHaveAttribute(

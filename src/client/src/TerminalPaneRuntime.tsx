@@ -185,6 +185,7 @@ export const TerminalPaneRuntime = memo(function TerminalPaneRuntime({
   const onActivateRef = useRef(onActivate);
   const activeRef = useRef(active);
   const focusSignalRef = useRef(focusSignal);
+  const appliedFocusSignalRef = useRef(0);
   const connectedRef = useRef(false);
   const inputEpochRef = useRef(0);
   const terminalInputRef = useRef<(data: string) => void>(() => undefined);
@@ -1094,7 +1095,13 @@ export const TerminalPaneRuntime = memo(function TerminalPaneRuntime({
         },
       );
       rectangularSelectionRef.current = rectangularSelection;
-      if (activeRef.current && focusSignalRef.current > 0) requestAnimationFrame(() => term.focus());
+      if (
+        activeRef.current &&
+        focusSignalRef.current > appliedFocusSignalRef.current
+      ) {
+        appliedFocusSignalRef.current = focusSignalRef.current;
+        requestAnimationFrame(() => term.focus());
+      }
       await waitForVisibleBox(containerRef.current);
       fitAddon = createTerminalFitter(term, containerRef.current);
       fitAddonRef.current = fitAddon;
@@ -1587,7 +1594,10 @@ export const TerminalPaneRuntime = memo(function TerminalPaneRuntime({
     const term = terminalRef.current;
     if (!active || !term) return;
     requestAnimationFrame(() => {
-      if (focusSignal > 0) term.focus();
+      if (focusSignal > appliedFocusSignalRef.current) {
+        appliedFocusSignalRef.current = focusSignal;
+        term.focus();
+      }
       fitAddonRef.current?.fit();
       sendResizeMessage(socketRef.current, "activate", term, isForegroundTerminal(activeRef.current));
     });

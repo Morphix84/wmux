@@ -14,11 +14,17 @@ This is intentionally not a multi-tenant SaaS app. Bearer authentication is defe
 
 ## Git Workflow
 
-- Use a focused topic branch and pull request for changes by default. Push the branch, open a PR with a concise summary and verification notes, and keep unrelated work out of it.
-- Run checks proportionate to the change before opening the PR; use `npm run check` for changes that affect runtime behavior or cross project boundaries.
-- Keep incomplete work in a draft PR. Before merging, incorporate current base-branch changes and confirm required checks are green.
-- Do not push directly to `main` unless the user explicitly requests a direct push or authorizes an urgent operational hotfix. Follow the hotfix with the same verification and durable documentation expected of a normal PR.
-- Do not merge a PR merely because it is green. Merge only when the user requests it or the task explicitly includes merging.
+- Optimize for fast local iteration in the current checkout, and do not create a worktree, topic branch, push, or pull request unless the user asks for one, isolation is materially useful, or the change is ready to integrate into `main`.
+- Keep related work on the current task branch and preserve unrelated changes already present in the checkout.
+- The local dogfood service may run from an unmerged branch during iteration, but report when a deployment is unmerged or depends on a dirty working tree.
+- Commit and push completed work before calling a deployment durable or handing it off for remote verification.
+- Run checks proportionate to the change before deployment or integration, and use `npm run check` for changes that affect runtime behavior or cross-project boundaries.
+- When integrating into `main`, prefer one focused pull request unless the user explicitly requests a direct push or authorizes an urgent operational hotfix.
+- Create a draft pull request only when sharing incomplete work is useful, and do not create one merely to park local iteration.
+- Before merging, incorporate current base-branch changes, review the final diff, and confirm required checks are green.
+- A request to fix, ship, deploy, land, integrate, or merge a change authorizes the normal pull-request and merge workflow once the work is complete and verified, without a separate merge-confirmation round trip.
+- A request limited to review, diagnosis, explanation, or status does not authorize merging or other external mutations.
+- Follow a direct-to-`main` hotfix with the same verification and durable documentation expected of a normal pull request.
 
 ## Commands
 
@@ -28,6 +34,12 @@ This is intentionally not a multi-tenant SaaS app. Bearer authentication is defe
 - `npm run build` builds the client and server.
 - `npm run check` runs tests, TypeScript checks, script validation, and the production build.
 - `npm run test:e2e` runs the isolated desktop and mobile Playwright suite.
+- `npm run test:e2e:server` runs specs that require the Playwright driver and fixture service to share a checkout and filesystem.
+- `npm run test:e2e:browser` runs the complementary browser-only group, which can use a fixture service on another trusted private-network host.
+- `npm run test:e2e:browser:chromium` runs the browser-only Chromium projects for cross-host execution on win-ci.
+- `npm run test:e2e:browser:webkit` runs the browser-only WebKit project on homelab, where its networking is reliable.
+- `npm run test:e2e:serve` starts an isolated standard-suite service on the explicit private IP in `WMUX_E2E_SERVER_HOST`; a browser-only runner connects by setting `WMUX_E2E_BASE_URL`.
+- Run concurrent E2E groups against separate fixture-service instances so their state mutations remain isolated.
 - `npm run docs:screenshots` regenerates the tracked desktop and mobile README screenshots from the isolated Playwright fixture.
 - `npm run start -- --host 127.0.0.1 --port 3478` runs the built service.
 - `npm run audit:sessions` audits local wmux-managed durable `tmux`/`screen` sessions.

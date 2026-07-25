@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   applyOptimisticCreations,
+  createClientIdEntropy,
+  createClientWorkspaceIds,
   optimisticSplitCreation,
   optimisticTabCreation,
   optimisticWorkspaceCreation,
@@ -113,4 +115,26 @@ test("optimistic tabs and splits survive unrelated incoming snapshots and remain
   const repeated = applyOptimisticCreations(withSplit, [tabCreation, splitCreation]);
   const repeatedTab = repeated.workspaces[0].tabs.find((candidate) => candidate.id === tabCreation.tab.id);
   assert.equal(repeatedTab?.panes.filter((pane) => pane.id === splitCreation.pane.id).length, 1);
+});
+
+test("client creation IDs work without secure-context randomUUID", () => {
+  let seed = 0;
+  const browserCrypto = {
+    getRandomValues: <T extends ArrayBufferView | null>(array: T): T => {
+      if (array instanceof Uint8Array) {
+        array.fill(seed);
+        seed += 1;
+      }
+      return array;
+    },
+  };
+
+  assert.equal(createClientIdEntropy(browserCrypto), "00".repeat(16));
+  assert.equal(createClientIdEntropy(browserCrypto), "01".repeat(16));
+
+  const ids = createClientWorkspaceIds();
+  assert.match(ids.workspaceId, /^ws_[0-9a-f]{32}$/);
+  assert.match(ids.tabId, /^tab_[0-9a-f]{32}$/);
+  assert.match(ids.paneId, /^pane_[0-9a-f]{32}$/);
+  assert.equal(new Set(Object.values(ids)).size, 3);
 });

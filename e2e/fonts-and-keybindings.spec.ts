@@ -403,32 +403,32 @@ test("persists a color scheme and applies it to the shared chrome palette", asyn
     await page.keyboard.press("ArrowUp");
     await page.keyboard.press("ArrowUp");
     await page.keyboard.press("ArrowUp");
-    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("ArrowLeft");
     await page.keyboard.press("ArrowRight");
     await expect.poll(() => page.locator("html").evaluate((element) =>
       element.style.getPropertyValue("--black"),
-    )).toBe("#282a36");
+    )).toBe("#0c0d0f");
     await expect.poll(() => page.locator("html").evaluate((element) => ({
       browserChrome: element.style.getPropertyValue("--wmux-browser-chrome"),
       terminalBackground: element.style.getPropertyValue("--terminal-background"),
       scheme: element.dataset.colorScheme,
     }))).toEqual({
-      browserChrome: "#282a36",
-      terminalBackground: "#282a36",
-      scheme: "dracula",
+      browserChrome: "#0c0d0f",
+      terminalBackground: "#0c0d0f",
+      scheme: "flock",
     });
-    await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute("content", "#282a36");
+    await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute("content", "#0c0d0f");
     await page.keyboard.press("Control+S");
 
     await expect.poll(async () => {
       const response = await request.get("/api/bootstrap");
       return (await response.json() as { settings: { colorScheme: string } }).settings.colorScheme;
-    }).toBe("dracula");
+    }).toBe("flock");
     await page.reload();
     await expect(page.locator("main.app-shell")).toBeVisible({ timeout: 20_000 });
     await expect.poll(() => page.locator("html").evaluate((element) =>
       element.style.getPropertyValue("--black"),
-    )).toBe("#282a36");
+    )).toBe("#0c0d0f");
 
     await page.routeWebSocket(/\/ws\/panes\//, (browserSocket) => {
       const serverSocket = browserSocket.connectToServer();

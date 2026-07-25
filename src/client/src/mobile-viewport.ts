@@ -39,10 +39,15 @@ export const mobileKeyboardLikelyOpen = (
 ): boolean => {
   if (!sample.isMobile) return false;
   const directlyOccluded = sample.layoutHeight - sample.viewportHeight > directKeyboardDelta;
+  const hasStableBaseline =
+    baseline.width > 0 &&
+    baseline.height > 0 &&
+    !mobileViewportShapeChanged(baseline, sample.viewportWidth);
   const baselineOccluded =
-    !mobileViewportShapeChanged(baseline, sample.viewportWidth) &&
+    hasStableBaseline &&
     baseline.height - sample.viewportHeight > baselineKeyboardDelta;
-  if (!directlyOccluded && !baselineOccluded) return false;
+  const viewportOccluded = hasStableBaseline ? baselineOccluded : directlyOccluded;
+  if (!viewportOccluded) return false;
   return sample.editableFocused || Boolean(sample.keyboardWasOpen);
 };
 

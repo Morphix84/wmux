@@ -34,6 +34,14 @@ export const TERMINAL_THEMES: Record<TerminalColorSchemeId, TerminalTheme> = {
     brightGreen: "#62d486", brightYellow: "#f4d35e", brightBlue: "#73adff", brightMagenta: "#c792ea",
     brightCyan: "#88d7e3", brightWhite: "#f2eee4",
   },
+  flock: {
+    background: "#0c0d0f", foreground: "#d8d9df", cursor: "#5b8cff", cursorAccent: "#0c0d0f",
+    selectionBackground: "#263551", selectionForeground: "#f1f2f5",
+    black: "#16181d", red: "#d95f76", green: "#77b86a", yellow: "#d4a958", blue: "#5b8cff",
+    magenta: "#b899e6", cyan: "#57bbc9", white: "#d8d9df", brightBlack: "#686d78", brightRed: "#ef7188",
+    brightGreen: "#8fca7f", brightYellow: "#e6bd69", brightBlue: "#78a1ff", brightMagenta: "#c9acf0",
+    brightCyan: "#72ceda", brightWhite: "#f1f2f5",
+  },
   "catppuccin-mocha": {
     background: "#1e1e2e", foreground: "#cdd6f4", cursor: "#f5e0dc", cursorAccent: "#1e1e2e",
     selectionBackground: "#45475a", selectionForeground: "#cdd6f4",

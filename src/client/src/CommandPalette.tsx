@@ -44,9 +44,15 @@ export function CommandPalette({
     setSelectedIndex(firstEnabled === -1 ? 0 : firstEnabled);
   }, [filteredCommands]);
 
+  const closePalette = () => {
+    const input = inputRef.current;
+    if (input && document.activeElement === input) input.blur();
+    onClose();
+  };
+
   const runCommand = async (command: PaletteCommand | undefined) => {
     if (!command || command.disabled) return;
-    onClose();
+    closePalette();
     await command.run();
   };
 
@@ -63,7 +69,7 @@ export function CommandPalette({
   };
 
   return (
-    <div className="command-backdrop" onMouseDown={(event) => event.currentTarget === event.target && onClose()}>
+    <div className="command-backdrop" onMouseDown={(event) => event.currentTarget === event.target && closePalette()}>
       <div
         ref={panelRef}
         className="command-panel"
@@ -74,7 +80,7 @@ export function CommandPalette({
         onKeyDown={(event) => {
           if (event.key === "Escape") {
             event.preventDefault();
-            onClose();
+            closePalette();
             return;
           }
           if (event.key === "ArrowDown") {
@@ -112,7 +118,7 @@ export function CommandPalette({
             className="command-close"
             title="Close command palette"
             aria-label="Close command palette"
-            onClick={onClose}
+            onClick={closePalette}
           >
             <X size={18} />
           </button>

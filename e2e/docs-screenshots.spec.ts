@@ -10,12 +10,12 @@ interface ScreenshotBootstrap {
   activeWorkspaceId: string;
   workspaces: Array<{
     id: string;
-    tabs: Array<{ panes: Array<{ id: string }> }>;
+    tabs: Array<{ id: string; panes: Array<{ id: string }> }>;
   }>;
 }
 
 const terminalDemo = [
-  "printf '\\033[2J\\033[H",
+  "printf '\\033]7;file://docs/workspace/wmux\\a\\033[2J\\033[H",
   "\\033[1;36mwmux\\033[0m  browser terminal multiplexer\\n\\n",
   "  \\033[32m●\\033[0m local session attached\\n",
   "  \\033[32m●\\033[0m durable workspace state\\n",
@@ -43,6 +43,22 @@ async function seedTerminal(request: APIRequestContext): Promise<void> {
     data: { title: "Documentation Preview" },
   });
   expect(titleResponse.ok()).toBeTruthy();
+
+  const agentResponse = await request.post("/api/agent-events", {
+    data: {
+      workspaceId: workspace.id,
+      tabId: workspace.tabs[0]!.id,
+      paneId: pane.id,
+      runId: "docs-preview",
+      sessionId: "docs-preview-session",
+      agent: "codex",
+      status: "running",
+      title: "Documentation Preview",
+      summary: "Polishing the browser terminal",
+      prompt: "Prepare the wmux documentation preview.",
+    },
+  });
+  expect(agentResponse.ok()).toBeTruthy();
 
   await paintTerminalDemo(request, pane.id);
 }

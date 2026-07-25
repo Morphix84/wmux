@@ -375,6 +375,8 @@ export function AppShell() {
   const settingsDefaults = state?.settingsDefaults ?? defaultSettings;
   const settings = previewSettings ?? persistedSettings;
   const displayMachines = useMemo(() => machines.map((machine) => withMachineAlias(machine, settings)), [machines, settings]);
+  const targetMachineId = resolveMachineTargetId(newMachineId, displayMachines);
+  const selectedMachine = displayMachines.find((machine) => machine.id === targetMachineId);
   const reachableMachineCount = displayMachines.filter((machine) => machine.reachable).length;
   const notifications = state?.notifications ?? [];
   const unreadNotifications = notifications.filter((notification) => !notification.read);
@@ -468,9 +470,15 @@ export function AppShell() {
     collapsedWorkspaceIds: persistedSettings.collapsedWorkspaceIds,
     activityByWorkspaceId: workspaceActivity,
   }), [activeWorkspace?.id, persistedSettings.collapsedWorkspaceIds, state?.workspaces, workspaceActivity, workspaceHostFilter]);
+  const openTuiWorkspaceTree = useMemo(() => deriveWorkspaceTree({
+    workspaces: state?.workspaces ?? [],
+    activeWorkspaceId: activeWorkspace?.id,
+    collapsedWorkspaceIds: persistedSettings.collapsedWorkspaceIds,
+    activityByWorkspaceId: workspaceActivity,
+  }), [activeWorkspace?.id, persistedSettings.collapsedWorkspaceIds, state?.workspaces, workspaceActivity]);
   const openTuiWorkspaces = useMemo<OpenTuiSidebarWorkspace[]>(
     () =>
-      workspaceTree.rows.flatMap((treeRow) => {
+      openTuiWorkspaceTree.rows.flatMap((treeRow) => {
         const workspace = treeRow.workspace;
         const presentationMachineId = workspacePresentationMachineId(workspace);
         const machine = machineFor(displayMachines, presentationMachineId);
@@ -506,6 +514,7 @@ export function AppShell() {
             tabId: tab.id,
             title: workspace.name,
             descriptor: visibleDescriptor && visibleDescriptor !== host ? visibleDescriptor : "",
+            machineId: presentationMachineId,
             host,
             cwd,
             reachable: Boolean(machine?.reachable),
@@ -537,19 +546,32 @@ export function AppShell() {
       latestUnreadByWorkspaceId,
       machines,
       unreadByWorkspaceId,
-      workspaceTree.rows,
+      openTuiWorkspaceTree.rows,
     ],
   );
   const openTuiMachines = useMemo<OpenTuiSidebarMachine[]>(
     () =>
-      displayMachines.map((machine) => ({
-        id: machine.id,
-        name: machine.name,
-        version: machine.releaseVersion,
-        reachable: machine.reachable,
-        detail: machineStatusDetail(machine),
-      })),
-    [displayMachines],
+      displayMachines.map((machine) => {
+        const machineWorkspaces = (state?.workspaces ?? []).filter(
+          (workspace) => workspacePresentationMachineId(workspace) === machine.id,
+        );
+        const activeAgentCount = machineWorkspaces.filter((workspace) => {
+          const agent = latestAgentByWorkspaceId.get(workspace.id);
+          if (!agent) return false;
+          const status = agentStatusClass(agent.status);
+          return status === "running" || status === "waiting";
+        }).length;
+        return {
+          id: machine.id,
+          name: machine.name,
+          version: machine.releaseVersion,
+          reachable: machine.reachable,
+          detail: machineStatusDetail(machine),
+          workspaceCount: machineWorkspaces.length,
+          activeAgentCount,
+        };
+      }),
+    [displayMachines, latestAgentByWorkspaceId, state?.workspaces],
   );
   const openTuiActivityRows = useMemo<OpenTuiActivityRow[]>(
     () => {
@@ -701,8 +723,6 @@ export function AppShell() {
     setMachineManagerOpen(true);
   }, []);
 
-  const targetMachineId = resolveMachineTargetId(newMachineId, displayMachines);
-  const selectedMachine = displayMachines.find((machine) => machine.id === targetMachineId);
   useEffect(() => {
     if (!state) return;
     if (targetMachineId !== newMachineId) {
@@ -1504,10 +1524,8 @@ export function AppShell() {
           onActivateWorkspace={activateWorkspaceFromChrome}
           onReorderWorkspace={reorderWorkspace}
           onToggleWorkspace={toggleWorkspaceCollapsed}
-          movesDisabled={workspaceTree.movesDisabled}
+          movesDisabled={openTuiWorkspaceTree.movesDisabled}
           allWorkspaces={state.workspaces}
-          hostFilter={workspaceHostFilter}
-          onHostFilterChange={setWorkspaceHostFilter}
         />
       ) : (
       <aside
@@ -1590,7 +1608,7 @@ export function AppShell() {
                 latestAgentStatusLabel,
               );
               const host = displayWorkspaceHost(machine, sourceMachine, presentationMachineId);
-              const hostContext = latestAgentName ? `${host} / ${latestAgentName}` : host;
+              const hostContext = latestAgentName ? `${host} · ${latestAgentName}` : host;
               const visibleDescriptor = compactWorkspaceDescription(descriptor, 72);
               const tooltipDescriptor = compactWorkspaceDescription(descriptor, 200);
               const version = summarizeWorkspaceVersion(workspace, displayMachines);

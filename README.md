@@ -456,6 +456,7 @@ Automation, helper, registration, and registered-host credentials cannot access 
   indicators stay hidden unless an underlying runtime or helper update is
   needed.
 - Settings persist in `~/.wmux/settings.json` and include an app-wide color scheme shared by terminal, canvas and DOM chrome, dialogs, and browser chrome; terminal font size, scrollback, user-facing host aliases, inactive-tab streaming, and terminal scroll mode.
+- Fresh installs use the low-contrast Flock scheme, while the original wmux palette and the bundled terminal schemes remain available in Settings.
   Hidden cached tabs suspend terminal sockets by default while preserving their mounted terminal views; choose live streaming to retain the previous behavior.
   The terminal font family remains config-owned.
 - New local, SSH, and Windows panes receive the selected scheme as
@@ -905,11 +906,13 @@ npm run check
 npm run test:e2e
 ```
 
-- `npm run check` runs unit/integration tests, both TypeScript checks, helper
-  syntax validation, and the production build.
-- `npm run test:e2e` exercises desktop Chromium plus phone-sized Chromium and
-  WebKit against an isolated loopback-only service.
+- `npm run check` runs unit/integration tests, both TypeScript checks, helper syntax validation, and the production build.
+- `npm run test:e2e` exercises desktop Chromium plus phone-sized Chromium and WebKit against an isolated loopback-only service.
 - `npm run test:e2e:chromium` is the faster browser subset.
+- `npm run test:e2e:server` runs specs that require the Playwright driver and fixture service to share a checkout and filesystem.
+- `npm run test:e2e:browser` runs the complementary browser-only group, which can use a fixture service on another trusted private-network host.
+- `WMUX_E2E_SERVER_HOST=<private-ip> npm run test:e2e:serve` exposes an isolated fixture service to a trusted private-network runner, which uses `WMUX_E2E_BASE_URL=http://<private-ip>:3491`.
+- Keep the two groups on separate fixture-service instances so concurrent state mutations remain isolated.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow and
 [AGENTS.md](AGENTS.md) for engineering constraints and the complete list of

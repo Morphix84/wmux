@@ -3,7 +3,7 @@ import { hexToRgba, type RGBA } from "./opentui-grid";
 import { colorSchemeById, type TerminalColorScheme, type WmuxChromeColors } from "./color-schemes";
 import type { TerminalColorSchemeId } from "./types";
 
-const ColorSchemeContext = createContext<TerminalColorScheme>(colorSchemeById("wmux"));
+const ColorSchemeContext = createContext<TerminalColorScheme>(colorSchemeById("flock"));
 
 export interface OpenTuiTheme {
   colors: WmuxChromeColors;

@@ -1,4 +1,36 @@
+import type { Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
+
+async function openCommandPalette(
+  page: Page,
+  mobile: boolean,
+) {
+  if (mobile) {
+    await page.getByRole("banner", { name: "Mobile session controls" })
+      .getByRole("button", { name: "Open actions" })
+      .click();
+    return;
+  }
+  await page.keyboard.press("Control+K");
+}
+
+async function runPaletteCommand(
+  page: Page,
+  mobile: boolean,
+  title: string,
+) {
+  await openCommandPalette(page, mobile);
+  const palette = page.getByRole("dialog", { name: "Command palette" });
+  const search = palette.getByPlaceholder(
+    "Search commands, workspaces, tabs, hosts",
+  );
+  await search.pressSequentially(title);
+  if (mobile) {
+    await expect(palette.locator(".command-item.selected .command-title"))
+      .toHaveText(title);
+  }
+  await search.press("Enter");
+}
 
 test("adds a machine, creates a workspace on it, and removes it without shell access", async ({
   page,
@@ -6,17 +38,9 @@ test("adds a machine, creates a workspace on it, and removes it without shell ac
 }, testInfo) => {
   const machineId = `managed-e2e-${testInfo.project.name}`;
   const machineName = `Managed E2E ${testInfo.project.name}`;
+  const mobile = testInfo.project.name.startsWith("mobile-");
 
-  if (testInfo.project.name.startsWith("mobile-")) {
-    await page.getByRole("banner", { name: "Mobile session controls" })
-      .getByRole("button", { name: "Open terminal" })
-      .click();
-  }
-
-  await page.keyboard.press("Control+K");
-  const palette = page.getByRole("dialog", { name: "Command palette" });
-  await palette.getByPlaceholder("Search commands, workspaces, tabs, hosts").fill("Manage machines");
-  await palette.getByPlaceholder("Search commands, workspaces, tabs, hosts").press("Enter");
+  await runPaletteCommand(page, mobile, "Manage machines");
 
   const manager = page.getByRole("dialog", { name: "Machine management" });
   await expect(manager).toBeVisible();
@@ -31,10 +55,21 @@ test("adds a machine, creates a workspace on it, and removes it without shell ac
   await expect(manager.getByText(machineName, { exact: true })).toBeVisible();
   await manager.getByRole("button", { name: "Close", exact: true }).click();
 
-  await page.keyboard.press("Control+K");
-  await palette.getByPlaceholder("Search commands, workspaces, tabs, hosts")
-    .fill(`New workspace on ${machineName}`);
-  await palette.getByPlaceholder("Search commands, workspaces, tabs, hosts").press("Enter");
+  if (testInfo.project.name === "chromium") {
+    const agents = page.getByRole("tree", { name: "Agents" });
+    const existingAgent = agents.getByRole("treeitem").first();
+    await expect(existingAgent).toBeVisible();
+    const space = page.getByRole("navigation", { name: "Spaces" })
+      .getByRole("button", { name: new RegExp(`^${machineName},`) });
+    await space.focus();
+    await page.keyboard.press("Enter");
+    await expect(space).toHaveAttribute("aria-current", "true");
+    await expect(agents).toHaveAttribute("data-grouping", "space");
+    await expect(agents).toHaveAttribute("data-target-space-id", machineId);
+    await expect(existingAgent).toBeVisible();
+  }
+
+  await runPaletteCommand(page, mobile, `New workspace on ${machineName}`);
 
   let workspaceId = "";
   await expect.poll(async () => {
@@ -60,9 +95,14 @@ test("adds a machine, creates a workspace on it, and removes it without shell ac
     return payload.workspaces.some((workspace) => workspace.id === workspaceId);
   }).toBe(false);
 
-  await page.keyboard.press("Control+K");
-  await palette.getByPlaceholder("Search commands, workspaces, tabs, hosts").fill("Manage machines");
-  await palette.getByPlaceholder("Search commands, workspaces, tabs, hosts").press("Enter");
+  if (mobile) {
+    await expect(page.locator("main.app-shell"))
+      .not.toHaveClass(/mobile-keyboard-open/);
+    await expect(page.getByRole("banner", { name: "Mobile session controls" }))
+      .toBeVisible();
+  }
+
+  await runPaletteCommand(page, mobile, "Manage machines");
   await expect(manager).toBeVisible();
 
   page.once("dialog", (dialog) => dialog.accept());

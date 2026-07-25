@@ -9,6 +9,8 @@ export interface WmuxChromeColors {
   panel3: string;
   active: string;
   activeSoft: string;
+  selection: string;
+  selectionText: string;
   line: string;
   lineBright: string;
   gold: string;
@@ -49,6 +51,8 @@ const scheme = ({ id, name, accent, terminal }: SchemeInput): TerminalColorSchem
     panel3: mix(terminal.background, terminal.foreground, 0.1),
     active: mix(terminal.background, accent, 0.14),
     activeSoft: mix(terminal.background, accent, 0.075),
+    selection: accent,
+    selectionText: terminal.background,
     line: mix(terminal.background, terminal.foreground, 0.18),
     lineBright: mix(terminal.background, accent, 0.72),
     gold: accent,
@@ -71,6 +75,12 @@ export const terminalColorSchemes: readonly TerminalColorScheme[] = [
     name: "wmux",
     accent: "#f4d35e",
     terminal: terminalThemeById("wmux"),
+  }),
+  scheme({
+    id: "flock",
+    name: "Flock",
+    accent: "#5b8cff",
+    terminal: terminalThemeById("flock"),
   }),
   scheme({
     id: "catppuccin-mocha",
@@ -122,6 +132,8 @@ export const colorSchemeCssVariables = (value: TerminalColorScheme): Record<stri
   "--panel-3": value.chrome.panel3,
   "--line": value.chrome.line,
   "--line-bright": value.chrome.lineBright,
+  "--selection": value.chrome.selection,
+  "--selection-text": value.chrome.selectionText,
   "--gold": value.chrome.gold,
   "--gold-dim": value.chrome.goldDim,
   "--gold-hot": value.chrome.gold,
