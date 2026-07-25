@@ -104,7 +104,7 @@ test("shows three concurrent agents on two machines within one event revision", 
       expect(response.ok()).toBeTruthy();
     }
 
-    await page.goto("/");
+    await page.goto("/", { waitUntil: "domcontentloaded" });
     await expect(page.locator("main.app-shell")).toBeVisible({
       timeout: 20_000,
     });
