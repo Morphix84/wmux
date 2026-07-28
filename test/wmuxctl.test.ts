@@ -113,6 +113,28 @@ const cliProcess = async (
   child.stdin.end(input);
 });
 
+const wmuxctlModuleProcess = async (body: string, input: string) => new Promise<{
+  code: number | null;
+  stdout: string;
+  stderr: string;
+}>((resolve, reject) => {
+  const source = [
+    "import importlib.util, json, sys",
+    "spec = importlib.util.spec_from_file_location('wmuxctl_module', sys.argv[1])",
+    "module = importlib.util.module_from_spec(spec)",
+    "spec.loader.exec_module(module)",
+    body,
+  ].join("\n");
+  const child = spawn("python3", ["-c", source, wmuxctl], { cwd: repoRoot, stdio: ["pipe", "pipe", "pipe"] });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.setEncoding("utf8").on("data", (chunk) => { stdout += chunk; });
+  child.stderr.setEncoding("utf8").on("data", (chunk) => { stderr += chunk; });
+  child.on("error", reject);
+  child.on("close", (code) => resolve({ code, stdout, stderr }));
+  child.stdin.end(input);
+});
+
 test("wmuxctl output and wait read authenticated pane replay", async () => {
   const authorizations: Array<string | undefined> = [];
   const replay = "\u001b[2JDo you trust the contents of this directory?\r\n1. Yes, continue\r\ntask_complete";
@@ -1617,6 +1639,121 @@ test("generic scripts/wmuxctl wrapper routes tui help to the canonical CLI", asy
 
 const fastTuiGate = ["--gate-timeout", "0.05"];
 
+test("wmuxctl reconstructs only valid column-one CUP/HVP visual rows", async () => {
+  const capturedTmuxRepaint = [
+    "\u001bc", "\u001b[?1049h", "\u001b[?7l", "shell repaint padding   ",
+    "\u001b[8;1H", "WMUX_AGENT_TUI_READY captured-run      ", "\u001b[?7h",
+  ].join("");
+  const values = [
+    "left\u001b[4;1Hcup-one   ",
+    "left\u001b[4;0Hcup-zero   ",
+    "left\u001b[4;0001Hcup-leading-one   ",
+    "left\u001b[;00fhvp-zero   ",
+    "left\u001b[Hcup-omitted   ",
+    "left\u001b[;fhvp-omitted   ",
+    "left\u001b[4;2Hcolumn-two   ",
+    "left\u001b[4;1;1Hextra-parameter   ",
+    "left\u001b[?4;1Hprivate-parameter   ",
+    `left\u001b[${"9".repeat(4301)};1Hoverlong-row   `,
+    `left\u001b[4;${"0".repeat(4301)}1Hoverlong-column   `,
+    capturedTmuxRepaint,
+  ];
+  const completed = await wmuxctlModuleProcess(
+    "print(json.dumps([module.visible_terminal_rows(value) for value in json.load(sys.stdin)]))",
+    JSON.stringify(values),
+  );
+  assert.equal(completed.code, 0, completed.stderr);
+  assert.deepEqual(JSON.parse(completed.stdout), [
+    ["left", "cup-one"],
+    ["left", "cup-zero"],
+    ["left", "cup-leading-one"],
+    ["left", "hvp-zero"],
+    ["left", "cup-omitted"],
+    ["left", "hvp-omitted"],
+    ["leftcolumn-two"],
+    ["leftextra-parameter"],
+    ["leftprivate-parameter"],
+    ["leftoverlong-row"],
+    ["leftoverlong-column"],
+    ["shell repaint padding", "WMUX_AGENT_TUI_READY captured-run"],
+  ]);
+});
+
+test("wmuxctl strictly reassembles bounded wrapped agent result rows", async () => {
+  const runId = "wrapped-run";
+  const payload = { runId, ok: true, result: `long result ${"Ω".repeat(300)}` };
+  const encoded = Buffer.from(JSON.stringify(payload)).toString("base64");
+  const decode = [
+    "output = sys.stdin.read()",
+    `payload, exit_code = module.decode_agent_result(output, ${JSON.stringify(runId)})`,
+    "print(json.dumps({'payload': payload, 'exitCode': exit_code}))",
+  ].join("\n");
+  for (const unpadded of [false, true]) {
+    const transport = unpadded ? encoded.replace(/=+$/, "") : encoded;
+    const completeFirstRow = `WMUX_AGENT_RESULT ${transport}\nReady\nWMUX_AGENT_DONE ${runId} 0`;
+    const firstRow = await wmuxctlModuleProcess(decode, completeFirstRow);
+    assert.equal(firstRow.code, 0, firstRow.stderr);
+    assert.deepEqual(JSON.parse(firstRow.stdout), { payload, exitCode: 0 });
+
+    const chunks = transport.match(/.{1,31}/g) ?? [];
+    const wrapped = `\u001b[2;1HWMUX_AGENT_RESULT ${chunks[0]}   ${chunks.slice(1).map((chunk, index) => `\u001b[${index + 3};01f${chunk}   `).join("")}\u001b[90;1HReady\u001b[91;1HWMUX_AGENT_DONE ${runId} 0   `;
+    const completed = await wmuxctlModuleProcess(decode, wrapped);
+    assert.equal(completed.code, 0, completed.stderr);
+    assert.deepEqual(JSON.parse(completed.stdout), { payload, exitCode: 0 });
+  }
+
+  const invalidCases = [
+    `WMUX_AGENT_RESULT ${encoded.slice(0, 20)}\nnot-base64!\nWMUX_AGENT_DONE ${runId} 0`,
+    `WMUX_AGENT_RESULT ${"A".repeat(1024 * 1024 + 1)}\nWMUX_AGENT_DONE ${runId} 0`,
+    `WMUX_AGENT_RESULT ${encoded}\necho WMUX_AGENT_DONE ${runId} 0`,
+    `WMUX_AGENT_RESULT ${Buffer.from(JSON.stringify({ ...payload, runId: "other-run" })).toString("base64")}\nWMUX_AGENT_DONE ${runId} 0`,
+  ];
+  for (const replay of invalidCases) {
+    const rejected = await wmuxctlModuleProcess(decode, replay);
+    assert.notEqual(rejected.code, 0);
+    assert.match(rejected.stderr, /delegated result was incomplete/);
+  }
+
+  const deepPayload = Buffer.from(`{"runId":"${runId}","ok":true,"value":${"[".repeat(180)}0${"]".repeat(180)}}`).toString("base64");
+  const deeplyNested = await wmuxctlModuleProcess(decode, `WMUX_AGENT_RESULT ${deepPayload}\nWMUX_AGENT_DONE ${runId} 0`);
+  assert.notEqual(deeplyNested.code, 0);
+  assert.match(deeplyNested.stderr, /delegated result was incomplete/);
+
+  const callBoundSource = [
+    "output = sys.stdin.read()",
+    "base64_calls = 0",
+    "json_calls = 0",
+    "original_b64decode = module.base64.b64decode",
+    "original_json_loads = module.json.loads",
+    "def counted_b64decode(*args, **kwargs):",
+    "    global base64_calls",
+    "    base64_calls += 1",
+    "    return original_b64decode(*args, **kwargs)",
+    "def counted_json_loads(*args, **kwargs):",
+    "    global json_calls",
+    "    json_calls += 1",
+    "    return original_json_loads(*args, **kwargs)",
+    "module.base64.b64decode = counted_b64decode",
+    "module.json.loads = counted_json_loads",
+    `records = module.agent_result_records(output, ${JSON.stringify(runId)})`,
+    "print(json.dumps({'records': records, 'base64Calls': base64_calls, 'jsonCalls': json_calls}))",
+  ].join("\n");
+  const boundedChunks = encoded.match(/.{1,17}/g) ?? [];
+  const boundedReplay = `WMUX_AGENT_RESULT ${boundedChunks.join("\n")}\nReady`;
+  const callBound = await wmuxctlModuleProcess(callBoundSource, boundedReplay);
+  assert.equal(callBound.code, 0, callBound.stderr);
+  const callCounts = JSON.parse(callBound.stdout);
+  assert.deepEqual(callCounts.records, [payload]);
+  assert.equal(callCounts.jsonCalls, 1);
+  assert.ok(callCounts.base64Calls <= boundedChunks.length * 2, JSON.stringify(callCounts));
+
+  const deepCallBound = await wmuxctlModuleProcess(callBoundSource, `WMUX_AGENT_RESULT ${deepPayload}\nReady`);
+  assert.equal(deepCallBound.code, 0, deepCallBound.stderr);
+  const deepCounts = JSON.parse(deepCallBound.stdout);
+  assert.deepEqual(deepCounts.records, []);
+  assert.equal(deepCounts.jsonCalls, 0, "deep JSON must fail before recursive parsing");
+});
+
 test("wmuxctl tui uses post-launch replay, bracketed paste, and stable handoff JSON", async () => {
   const prompt = "private\tinteractive Ω\nsecond line";
   const promptPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "wmuxctl-tui-")), "prompt.txt");
@@ -1666,6 +1803,8 @@ type TuiFixtureOptions = {
   pathPrefix?: string;
   machineAtBootstrap?: (count: number) => Record<string, unknown>;
   replayAtUpgrade?: (count: number, runId: string, token: string) => string;
+  stallAtUpgrades?: number[];
+  replayDelayMs?: (count: number) => number;
 };
 
 const startTuiFixture = async (options: TuiFixtureOptions = {}) => {
@@ -1678,6 +1817,7 @@ const startTuiFixture = async (options: TuiFixtureOptions = {}) => {
   let upgrades = 0;
   let runId = "";
   let launchMarkerSent = false;
+  const upgradedSockets = new Set<import("node:stream").Duplex>();
   const defaultMachine = {
     id: "linux-box", kind: "ssh", platform: "linux", reachable: true,
     source: "static", endpoint: "10.0.0.2:22", user: "operator", port: 22,
@@ -1743,6 +1883,9 @@ const startTuiFixture = async (options: TuiFixtureOptions = {}) => {
     response.writeHead(404).end();
   });
   server.on("upgrade", (request, socket) => {
+    upgradedSockets.add(socket);
+    socket.on("close", () => upgradedSockets.delete(socket));
+    socket.on("error", () => {});
     upgrades += 1;
     const key = request.headers["sec-websocket-key"];
     assert.equal(typeof key, "string");
@@ -1751,8 +1894,12 @@ const startTuiFixture = async (options: TuiFixtureOptions = {}) => {
       "HTTP/1.1 101 Switching Protocols", "Upgrade: websocket", "Connection: Upgrade",
       `Sec-WebSocket-Accept: ${accept}`, "", "",
     ].join("\r\n"));
+    if (options.stallAtUpgrades?.includes(upgrades)) return;
     const replay = options.replayAtUpgrade?.(upgrades, runId, "test-token") ?? defaultReplay(upgrades);
-    socket.end(websocketFrame({ type: "ready", paneId: "pane_tui_fixture", replay }));
+    const sendReplay = () => socket.end(websocketFrame({ type: "ready", paneId: "pane_tui_fixture", replay }));
+    const delay = options.replayDelayMs?.(upgrades) ?? 0;
+    if (delay > 0) setTimeout(sendReplay, delay);
+    else sendReplay();
   });
   const origin = await listen(server);
   return {
@@ -1761,9 +1908,108 @@ const startTuiFixture = async (options: TuiFixtureOptions = {}) => {
     methods,
     workspaceRequests,
     get workspacePosts() { return workspacePosts; },
-    async stop() { await close(server); },
+    async stop() {
+      for (const socket of upgradedSockets) socket.destroy();
+      await close(server);
+    },
   };
 };
+
+test("wmuxctl tui recognizes padded CUP/HVP helper records and safety gates but rejects marker echoes", async () => {
+  const padded = await startTuiFixture({
+    replayAtUpgrade: (count, runId) => {
+      if (count === 1) return "operator@host $ ";
+      if (count === 2) return "baseline";
+      if (count === 3) {
+        return `\u001bc\u001b[?1049h\u001b[?7lcommand echo WMUX_AGENT_TUI_READY ${runId}   \u001b[8;00HWMUX_AGENT_TUI_READY ${runId}      \u001b[?7h`;
+      }
+      if (count === 4) return `stale launch row   \u001b[9;01fWMUX_AGENT_TUI_LAUNCH ${runId}      `;
+      return "interactive TUI rendered";
+    },
+  });
+  try {
+    const completed = await cliProcess(padded.url, [
+      "tui", "codex", "linux-box", "--directory", "/srv/project", "--no-prompt", ...fastTuiGate,
+    ]);
+    assert.equal(completed.code, 0, completed.stderr);
+    assert.equal(JSON.parse(completed.stdout).state, "ready");
+  } finally {
+    await padded.stop();
+  }
+
+  const paddedGate = await startTuiFixture({
+    replayAtUpgrade: (count, runId) => {
+      if (count === 1) return "operator@host $ ";
+      if (count === 2) return "baseline";
+      if (count === 3) return `old row\u001b[7;1HWMUX_AGENT_TUI_READY ${runId}   `;
+      if (count === 4) return `old row\u001b[8;1fWMUX_AGENT_TUI_LAUNCH ${runId}   `;
+      return "splash padding    \u001b[12;1HEnter your API key:      ";
+    },
+  });
+  try {
+    const completed = await cliProcess(paddedGate.url, [
+      "tui", "codex", "linux-box", "--directory", "/srv/project", "--no-prompt", ...fastTuiGate,
+    ]);
+    assert.equal(completed.code, 1);
+    assert.match(JSON.parse(completed.stdout).error, /login prompt/);
+  } finally {
+    await paddedGate.stop();
+  }
+
+  const echoed = await startTuiFixture({
+    replayAtUpgrade: (count, runId) => {
+      if (count === 1) return "operator@host $ ";
+      if (count === 2) return "baseline";
+      return `shell\u001b[4;1Hprintf 'WMUX_AGENT_TUI_READY ${runId}'      `;
+    },
+  });
+  try {
+    const completed = await cliProcess(echoed.url, [
+      "tui", "codex", "linux-box", "--directory", "/srv/project", "--no-prompt",
+      "--ready-timeout", "0.08", ...fastTuiGate,
+    ]);
+    assert.equal(completed.code, 1);
+    assert.match(JSON.parse(completed.stdout).error, /waiting for interactive helper marker/);
+    assert.equal(echoed.inputs.length, 2, "an echoed READY marker must not receive a launch request");
+  } finally {
+    await echoed.stop();
+  }
+});
+
+test("wmuxctl tui bounds baseline, marker, and post-launch replay reads under one ready deadline", async () => {
+  for (const stalledUpgrade of [2, 3, 5]) {
+    const fixture = await startTuiFixture({ stallAtUpgrades: [stalledUpgrade] });
+    try {
+      const started = performance.now();
+      const completed = await cliProcess(fixture.url, [
+        "tui", "codex", "linux-box", "--directory", "/srv/project", "--no-prompt",
+        "--ready-timeout", "0.08", ...fastTuiGate,
+      ]);
+      assert.equal(completed.code, 1, `upgrade ${stalledUpgrade} unexpectedly succeeded`);
+      assert.ok(performance.now() - started < 600, `upgrade ${stalledUpgrade} exceeded the bounded read deadline`);
+      assert.match(JSON.parse(completed.stdout).error, /timed out/);
+    } finally {
+      await fixture.stop();
+    }
+  }
+
+  const cumulative = await startTuiFixture({
+    replayDelayMs: (count) => count >= 2 && count <= 4 ? 45 : 0,
+  });
+  try {
+    const started = performance.now();
+    const completed = await cliProcess(cumulative.url, [
+      "tui", "codex", "linux-box", "--directory", "/srv/project", "--no-prompt",
+      "--ready-timeout", "0.1", ...fastTuiGate,
+    ]);
+    assert.equal(completed.code, 1, "independent per-read deadlines would incorrectly permit this launch");
+    const elapsed = performance.now() - started;
+    assert.ok(elapsed < 650, `coherent ready deadline was exceeded: ${elapsed}ms`);
+    assert.match(JSON.parse(completed.stdout).error, /timed out/);
+  } finally {
+    await cumulative.stop();
+  }
+});
 
 test("wmuxctl tui nests fresh workspaces from its invoking pane and otherwise creates roots", async () => {
   const args = ["tui", "codex", "linux-box", "--directory", "/srv/project", "--no-prompt", ...fastTuiGate];
@@ -2046,7 +2292,8 @@ test("wmuxctl tui reports helper failure immediately and post-launch timeout wit
       if (count === 3) return `WMUX_AGENT_TUI_READY ${runId}`;
       const escapedPrompt = JSON.stringify(prompt).slice(1, -1);
       const payload = Buffer.from(JSON.stringify({ runId, ok: false, error: `launch rejected ${escapedPrompt} ${token}` })).toString("base64");
-      return `WMUX_AGENT_RESULT ${payload}\nWMUX_AGENT_DONE ${runId} 2`;
+      const wrapped = payload.match(/.{1,29}/g) ?? [];
+      return `old row\u001b[2;1HWMUX_AGENT_RESULT ${wrapped[0]}   ${wrapped.slice(1).map((chunk, index) => `\u001b[${index + 3};1f${chunk}   `).join("")}\u001b[20;1HWMUX_AGENT_DONE ${runId} 2   `;
     },
   });
   try {
@@ -2080,7 +2327,7 @@ test("wmuxctl tui reports helper failure immediately and post-launch timeout wit
   });
   try {
     const completed = await cliProcess(timeoutFixture.url, [
-      "tui", "codex", "linux-box", "--directory", "/srv/project", "--no-prompt", "--ready-timeout", "0.05",
+      "tui", "codex", "linux-box", "--directory", "/srv/project", "--no-prompt", "--ready-timeout", "0.5",
       ...fastTuiGate,
     ]);
     assert.equal(completed.code, 1);

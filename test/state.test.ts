@@ -319,6 +319,84 @@ test("newer state schemas refuse downgrade without moving or overwriting the fil
   });
 });
 
+test("current v6 state truncates an oversized notification body without losing workspace metadata", () => {
+  withTempState((filePath, dir) => {
+    const seeded = new StateStore(machines, filePath).snapshot();
+    seeded.workspaces[0].name = "Operator-owned workspace";
+    seeded.workspaces[0].nameSource = "user";
+    seeded.workspaces[0].descriptor = "Keep this exact workspace descriptor";
+    seeded.workspaces[0].descriptorSource = "user";
+    const workspace = structuredClone(seeded.workspaces[0]);
+    const tab = workspace.tabs[0];
+    const pane = tab.panes[0];
+    seeded.notifications = [{
+      id: "note_oversized_primary",
+      workspaceId: workspace.id,
+      tabId: tab.id,
+      paneId: pane.id,
+      title: "Recovered notification",
+      subtitle: "completed",
+      body: `${"a".repeat(1999)}😀tail`,
+      createdAt: "2026-07-27T00:00:00.000Z",
+      read: false,
+    }];
+    const expectedWorkspaces = JSON.parse(JSON.stringify(seeded.workspaces));
+    fs.writeFileSync(filePath, JSON.stringify(seeded));
+
+    const recovered = new StateStore(machines, filePath);
+    assert.deepEqual(recovered.snapshot().workspaces, expectedWorkspaces);
+    assert.equal(recovered.snapshot().notifications[0].body, "a".repeat(1999));
+    assert.equal(fs.readdirSync(dir).some((name) => name.includes(".corrupt-")), false);
+    for (const persistedPath of [filePath, `${filePath}.bak`]) {
+      const persisted = JSON.parse(fs.readFileSync(persistedPath, "utf8"));
+      assert.equal(persisted.notifications[0].body, "a".repeat(1999));
+      assert.deepEqual(persisted.workspaces, expectedWorkspaces);
+    }
+
+    const alreadyNormalized = new StateStore(machines, filePath);
+    assert.equal(alreadyNormalized.snapshot().notifications[0].body, "a".repeat(1999));
+    assert.deepEqual(alreadyNormalized.snapshot().workspaces, expectedWorkspaces);
+  });
+});
+
+test("current v6 backup truncates an oversized notification body without quarantine or workspace loss", () => {
+  withTempState((filePath, dir) => {
+    const seeded = new StateStore(machines, filePath).snapshot();
+    seeded.workspaces[0].name = "Backup workspace";
+    seeded.workspaces[0].nameSource = "user";
+    seeded.workspaces[0].descriptor = "Backup metadata survives";
+    seeded.workspaces[0].descriptorSource = "user";
+    const workspace = structuredClone(seeded.workspaces[0]);
+    const tab = workspace.tabs[0];
+    const pane = tab.panes[0];
+    seeded.notifications = [{
+      id: "note_oversized_backup",
+      workspaceId: workspace.id,
+      tabId: tab.id,
+      paneId: pane.id,
+      title: "Recovered backup notification",
+      subtitle: "completed",
+      body: `${"b".repeat(1998)}😀tail`,
+      createdAt: "2026-07-27T00:00:00.000Z",
+      read: false,
+    }];
+    const expectedWorkspaces = JSON.parse(JSON.stringify(seeded.workspaces));
+    fs.writeFileSync(`${filePath}.bak`, JSON.stringify(seeded));
+    fs.rmSync(filePath);
+
+    const recovered = new StateStore(machines, filePath);
+    assert.deepEqual(recovered.snapshot().workspaces, expectedWorkspaces);
+    assert.equal(recovered.snapshot().notifications[0].body, `${"b".repeat(1998)}😀`);
+    assert.equal(recovered.snapshot().notifications[0].body.length, 2000);
+    assert.equal(fs.readdirSync(dir).some((name) => name.includes(".corrupt-")), false);
+    for (const persistedPath of [filePath, `${filePath}.bak`]) {
+      const persisted = JSON.parse(fs.readFileSync(persistedPath, "utf8"));
+      assert.equal(persisted.notifications[0].body, `${"b".repeat(1998)}😀`);
+      assert.deepEqual(persisted.workspaces, expectedWorkspaces);
+    }
+  });
+});
+
 test("fresh store creates its initial workspace on the first remote machine", () => {
   withTempState((filePath) => {
     const remoteMachines: MachineConfig[] = [
