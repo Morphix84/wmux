@@ -121,6 +121,7 @@ export class StateStore extends EventEmitter {
   private state: PersistedState;
   private writeTimer: ReturnType<typeof setTimeout> | null = null;
   private dirty = false;
+  private replaceBackupOnFlush = false;
 
   constructor(
     machines: MachineConfig[],
@@ -213,6 +214,11 @@ export class StateStore extends EventEmitter {
         fs.chmodSync(this.backupPath(), 0o600);
       }
       fs.renameSync(tempPath, this.filePath);
+      if (this.replaceBackupOnFlush) {
+        fs.copyFileSync(this.filePath, this.backupPath());
+        fs.chmodSync(this.backupPath(), 0o600);
+        this.replaceBackupOnFlush = false;
+      }
     } catch (error) {
       fs.rmSync(tempPath, { force: true });
       throw error;
@@ -713,7 +719,8 @@ export class StateStore extends EventEmitter {
       if (restored) {
         const beforeNormalization = JSON.stringify(restored.state);
         const normalized = { ...this.normalizeRestoredState(restored.state), machines: safeMachines };
-        this.dirty = restored.migrated || JSON.stringify(normalized) !== beforeNormalization;
+        this.dirty = restored.migrated || restored.normalized || JSON.stringify(normalized) !== beforeNormalization;
+        this.replaceBackupOnFlush = restored.normalized;
         return normalized;
       }
       // Corrupt/unreadable state: quarantine the bad file rather than crashing
@@ -725,6 +732,7 @@ export class StateStore extends EventEmitter {
       if (backup) {
         console.error(`wmux: recovered state from ${this.backupPath()}`);
         this.dirty = true;
+        this.replaceBackupOnFlush = backup.normalized;
         return { ...this.normalizeRestoredState(backup.state), machines: safeMachines };
       }
       this.quarantineStateFile(this.backupPath());

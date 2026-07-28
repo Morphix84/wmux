@@ -221,7 +221,35 @@ const persistedStateSchema = z.object({
 export interface ParsedPersistedState {
   state: PersistedState;
   migrated: boolean;
+  normalized: boolean;
 }
+
+const normalizeNotificationBodies = (
+  record: Record<string, unknown>,
+): { record: Record<string, unknown>; normalized: boolean } => {
+  if (!Array.isArray(record.notifications)) return { record, normalized: false };
+  let normalized = false;
+  const notifications = record.notifications.map((notification) => {
+    if (!notification || typeof notification !== "object" || Array.isArray(notification)) return notification;
+    const notificationRecord = notification as Record<string, unknown>;
+    const body = notificationRecord.body;
+    if (typeof body !== "string" || body.length <= 2000) return notification;
+    let end = 2000;
+    const finalCodeUnit = body.charCodeAt(end - 1);
+    const followingCodeUnit = body.charCodeAt(end);
+    if (
+      finalCodeUnit >= 0xD800
+      && finalCodeUnit <= 0xDBFF
+      && followingCodeUnit >= 0xDC00
+      && followingCodeUnit <= 0xDFFF
+    ) end -= 1;
+    normalized = true;
+    return { ...notificationRecord, body: body.slice(0, end) };
+  });
+  return normalized
+    ? { record: { ...record, notifications }, normalized }
+    : { record, normalized };
+};
 
 const migratePreV2State = (record: Record<string, unknown>): Record<string, unknown> => ({
   ...record,
@@ -428,7 +456,12 @@ export const parsePersistedState = (input: unknown): ParsedPersistedState => {
   const candidate = rawVersion === CURRENT_STATE_SCHEMA_VERSION
     ? record
     : migrateV5ToV6State(v5Candidate);
-  return { state: persistedStateSchema.parse(candidate), migrated };
+  const normalized = normalizeNotificationBodies(candidate);
+  return {
+    state: persistedStateSchema.parse(normalized.record),
+    migrated,
+    normalized: normalized.normalized,
+  };
 };
 
 const collectLayoutPaneIds = (node: LayoutNode): string[] =>

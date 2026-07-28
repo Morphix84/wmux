@@ -216,6 +216,11 @@ with tempfile.TemporaryDirectory() as state_dir:
         if settled:
             break
         time.sleep(0.05)
+    while time.monotonic() < deadline:
+        snapshot = supervisor.snapshot()
+        if snapshot["restartCount"] >= 2 and snapshot["lastExitCode"] == 7:
+            break
+        time.sleep(0.05)
     supervisor.stop()
     snapshot = supervisor.snapshot()
     rollout = module["StreamSupervisor"](

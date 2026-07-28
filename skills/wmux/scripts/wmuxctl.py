@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import codecs
 import hashlib
 import json
 import math
@@ -28,6 +29,7 @@ WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 DURABLE_REFRESH_QUIET_SECONDS = 0.08
 DURABLE_REFRESH_FALLBACK_SECONDS = 0.7
 MAX_PANE_REPLAY_BYTES = 2 * 1024 * 1024
+MAX_AGENT_RESULT_BASE64_CHARS = 1024 * 1024
 MIN_DELEGATION_WAIT_TIMEOUT_SECONDS = 0.1
 MAX_DELEGATION_WAIT_TIMEOUT_SECONDS = 14_400
 DEFAULT_DELEGATION_WAIT_TIMEOUT_SECONDS = {
@@ -616,6 +618,8 @@ ANSI_ESCAPE = re.compile(
     r"|[ -/]*[0-~]"
     r")"
 )
+CUP_HVP_ESCAPE = re.compile(r"\x1b\[([0-9;]*)(?:H|f)")
+BASE64_VISUAL_ROW = re.compile(r"[A-Za-z0-9+/]*={0,2}")
 
 
 def clean_terminal_text(value: str) -> str:
@@ -629,6 +633,20 @@ def clean_terminal_text(value: str) -> str:
         if character == "\n" or character == "\t" or ord(character) >= 32:
             output.append(character)
     return "".join(output)
+
+
+def visible_terminal_rows(value: str) -> list[str]:
+    def row_boundary(match: re.Match[str]) -> str:
+        parameters = match.group(1).split(";")
+        if len(parameters) > 2 or any(len(component) > 16 for component in parameters):
+            return match.group(0)
+        column = parameters[1] if len(parameters) == 2 else ""
+        if column and not re.fullmatch(r"(?:0+|0*1)", column):
+            return match.group(0)
+        return "\n"
+
+    positioned = CUP_HVP_ESCAPE.sub(row_boundary, value)
+    return [line.rstrip(" \t") for line in clean_terminal_text(positioned).splitlines()]
 
 
 def wait_for_output(
@@ -1041,25 +1059,223 @@ def validate_tui_args(args: argparse.Namespace) -> None:
         raise SystemExit("wmuxctl: TUI directory must be an absolute POSIX path of at most 4096 characters")
 
 
-def replay_digest(client: WmuxClient, pane_id: str, cols: int, rows: int) -> tuple[str, str]:
-    replay = str(client.read_pane_output(pane_id, cols, rows).get("replay") or "")
+def replay_digest(
+    client: WmuxClient,
+    pane_id: str,
+    cols: int,
+    rows: int,
+    timeout: float = 10,
+) -> tuple[str, str]:
+    replay = str(client.read_pane_output(pane_id, cols, rows, timeout=timeout).get("replay") or "")
     return hashlib.sha256(replay.encode("utf-8")).hexdigest(), replay
 
 
+def pane_read_timed_out(error: BaseException) -> bool:
+    return isinstance(error, TimeoutError) or (
+        isinstance(error, SystemExit) and isinstance(error.__cause__, TimeoutError)
+    )
+
+
+class JsonObjectCompletion:
+    def __init__(self) -> None:
+        self.stack: list[str] = []
+        self.started = False
+        self.complete = False
+        self.in_string = False
+        self.escaped = False
+        self.failed = False
+
+    def clone(self) -> JsonObjectCompletion:
+        clone = JsonObjectCompletion()
+        clone.stack = self.stack.copy()
+        clone.started = self.started
+        clone.complete = self.complete
+        clone.in_string = self.in_string
+        clone.escaped = self.escaped
+        clone.failed = self.failed
+        return clone
+
+    def feed(self, value: str) -> None:
+        for character in value:
+            if self.failed:
+                return
+            if self.complete:
+                if not character.isspace():
+                    self.failed = True
+                continue
+            if not self.started:
+                if character.isspace():
+                    continue
+                if character != "{":
+                    self.failed = True
+                    continue
+                self.started = True
+                self.stack.append("}")
+                continue
+            if self.in_string:
+                if self.escaped:
+                    self.escaped = False
+                elif character == "\\":
+                    self.escaped = True
+                elif character == '"':
+                    self.in_string = False
+                continue
+            if character == '"':
+                self.in_string = True
+            elif character == "{":
+                self.stack.append("}")
+            elif character == "[":
+                self.stack.append("]")
+            elif character in "}]":
+                if not self.stack or self.stack.pop() != character:
+                    self.failed = True
+                elif not self.stack:
+                    self.complete = True
+            if len(self.stack) > 128:
+                self.failed = True
+
+
+class StreamingAgentResult:
+    def __init__(self, run_id: str) -> None:
+        self.run_id = run_id
+        self.encoded_size = 0
+        self.pending = ""
+        self.padding_started = False
+        self.decoded = bytearray()
+        self.utf8_decoder = codecs.getincrementaldecoder("utf-8")()
+        self.json_completion = JsonObjectCompletion()
+
+    @staticmethod
+    def decode_final_quantum(value: str) -> bytes:
+        padded = value + "=" * ((4 - len(value) % 4) % 4)
+        decoded = base64.b64decode(padded, validate=True)
+        if base64.b64encode(decoded).decode("ascii").rstrip("=") != value.rstrip("="):
+            raise ValueError("non-canonical Base64 payload")
+        return decoded
+
+    def feed_decoded(self, value: bytes, final: bool = False) -> bool:
+        try:
+            text = self.utf8_decoder.decode(value, final=final)
+        except UnicodeError:
+            return False
+        self.decoded.extend(value)
+        self.json_completion.feed(text)
+        return not self.json_completion.failed
+
+    def parsed_candidate(self, decoded_suffix: bytes = b"") -> tuple[bool, dict[str, Any] | None]:
+        raw = bytes(self.decoded) + decoded_suffix
+        try:
+            candidate = json.loads(raw.decode("utf-8"))
+        except (RecursionError, UnicodeError, ValueError):
+            return True, None
+        if (
+            isinstance(candidate, dict)
+            and candidate.get("runId") == self.run_id
+            and isinstance(candidate.get("ok"), bool)
+        ):
+            return True, candidate
+        return True, None
+
+    def completion_at_row_boundary(self) -> tuple[bool, dict[str, Any] | None]:
+        if self.json_completion.failed:
+            return True, None
+        if not self.pending:
+            if not self.json_completion.complete:
+                return False, None
+            try:
+                tail = self.utf8_decoder.decode(b"", final=True)
+            except UnicodeError:
+                return True, None
+            completion = self.json_completion.clone()
+            completion.feed(tail)
+            return self.parsed_candidate() if completion.complete and not completion.failed else (True, None)
+        if len(self.pending) not in {2, 3} or "=" in self.pending:
+            return False, None
+        try:
+            suffix = self.decode_final_quantum(self.pending)
+            decoder = codecs.getincrementaldecoder("utf-8")()
+            decoder.setstate(self.utf8_decoder.getstate())
+            text = decoder.decode(suffix, final=True)
+        except (UnicodeError, ValueError):
+            return False, None
+        completion = self.json_completion.clone()
+        completion.feed(text)
+        if not completion.complete or completion.failed:
+            return False, None
+        return self.parsed_candidate(suffix)
+
+    def feed_row(self, row: str) -> tuple[bool, dict[str, Any] | None]:
+        if not row or not BASE64_VISUAL_ROW.fullmatch(row):
+            return True, None
+        self.encoded_size += len(row)
+        if self.encoded_size > MAX_AGENT_RESULT_BASE64_CHARS:
+            return True, None
+        if self.padding_started and any(character != "=" for character in row):
+            return True, None
+        if "=" in row:
+            self.padding_started = True
+        combined = self.pending + row
+        padding_index = combined.find("=")
+        if padding_index >= 0:
+            if any(character != "=" for character in combined[padding_index:]) or len(combined) - padding_index > 2:
+                return True, None
+            complete_length = padding_index // 4 * 4
+        else:
+            complete_length = len(combined) // 4 * 4
+        complete_prefix = combined[:complete_length]
+        self.pending = combined[complete_length:]
+        if complete_prefix:
+            try:
+                decoded = base64.b64decode(complete_prefix, validate=True)
+            except ValueError:
+                return True, None
+            if not self.feed_decoded(decoded):
+                return True, None
+        if "=" in self.pending:
+            if len(self.pending) < 4:
+                return (False, None) if re.fullmatch(r"[A-Za-z0-9+/]{2}=", self.pending) else (True, None)
+            if len(self.pending) != 4:
+                return True, None
+            try:
+                decoded = self.decode_final_quantum(self.pending)
+            except ValueError:
+                return True, None
+            self.pending = ""
+            if not self.feed_decoded(decoded, final=True):
+                return True, None
+            return self.parsed_candidate() if self.json_completion.complete else (True, None)
+        return self.completion_at_row_boundary()
+
+
+def agent_result_records(output: str, run_id: str) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    rows = visible_terminal_rows(output)
+    prefix = "WMUX_AGENT_RESULT "
+    index = 0
+    while index < len(rows):
+        if not rows[index].startswith(prefix):
+            index += 1
+            continue
+        stream = StreamingAgentResult(run_id)
+        row = rows[index].removeprefix(prefix)
+        while True:
+            finished, candidate = stream.feed_row(row)
+            index += 1
+            if finished:
+                if candidate is not None:
+                    records.append(candidate)
+                break
+            if index >= len(rows) or not rows[index] or not BASE64_VISUAL_ROW.fullmatch(rows[index]):
+                break
+            row = rows[index]
+    return records
+
+
 def helper_failure(replay: str, run_id: str) -> str:
-    payload: dict[str, Any] | None = None
+    payload = next((record for record in reversed(agent_result_records(replay, run_id)) if record["ok"] is False), None)
     done_code: int | None = None
     tui_exit_code: int | None = None
-    for line in clean_terminal_text(replay).splitlines():
-        if line.startswith("WMUX_AGENT_RESULT "):
-            try:
-                candidate = json.loads(
-                    base64.b64decode(line.removeprefix("WMUX_AGENT_RESULT "), validate=True).decode("utf-8")
-                )
-            except (ValueError, UnicodeDecodeError, json.JSONDecodeError):
-                continue
-            if isinstance(candidate, dict) and candidate.get("runId") == run_id and candidate.get("ok") is False:
-                payload = candidate
+    for line in visible_terminal_rows(replay):
         match = re.fullmatch(r"WMUX_AGENT_DONE ([A-Za-z0-9._-]+) (-?\d+)", line)
         if match and match.group(1) == run_id:
             done_code = int(match.group(2))
@@ -1085,19 +1301,27 @@ def wait_for_helper_marker(
     timeout: float,
     cols: int,
     rows: int,
+    deadline: float | None = None,
 ) -> str:
-    started = time.monotonic()
+    deadline = deadline or time.monotonic() + timeout
     while True:
-        digest, replay = replay_digest(client, pane_id, cols, rows)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise SystemExit(f"wmuxctl: timed out after {timeout:g}s waiting for interactive helper marker {marker!r}")
+        try:
+            digest, replay = replay_digest(client, pane_id, cols, rows, remaining)
+        except (TimeoutError, SystemExit) as error:
+            if not pane_read_timed_out(error):
+                raise
+            raise SystemExit(
+                f"wmuxctl: timed out after {timeout:g}s waiting for interactive helper marker {marker!r}"
+            ) from error
         failure = helper_failure(replay, run_id)
         if failure:
             raise SystemExit(f"wmuxctl: interactive helper failed: {failure}")
-        if digest != previous and marker in clean_terminal_text(replay).splitlines():
+        if digest != previous and marker in visible_terminal_rows(replay):
             return replay
-        elapsed = time.monotonic() - started
-        if elapsed >= timeout:
-            raise SystemExit(f"wmuxctl: timed out after {timeout:g}s waiting for interactive helper marker {marker!r}")
-        time.sleep(min(0.25, timeout - elapsed))
+        time.sleep(min(0.25, max(0, deadline - time.monotonic())))
 
 
 TRUST_PROMPT = re.compile(
@@ -1127,7 +1351,7 @@ UI_CHOICE = re.compile(r"^(?:[>❯*•]\s*)?(?:\d+[.)]?\s+|\[[ xX]\]\s*)?(?:yes|
 
 
 def active_tui_lines(replay: str) -> list[str]:
-    lines = [line.strip(" \t│┃┆┇┊┋┌┐└┘┏┓┗┛─━") for line in clean_terminal_text(replay).splitlines()]
+    lines = [line.strip(" \t│┃┆┇┊┋┌┐└┘┏┓┗┛─━") for line in visible_terminal_rows(replay)]
     return [line for line in lines if line][-12:]
 
 
@@ -1167,13 +1391,31 @@ def wait_for_tui_snapshot(
     rows: int,
     observe_gates: bool = True,
     gate_timeout: float = 0,
+    deadline: float | None = None,
 ) -> tuple[str, str]:
     """Require fresh child output, then continuously observe bounded startup gates."""
     started = time.monotonic()
     first_change_at: float | None = None
     latest_replay = ""
+    ready_deadline = deadline or started + timeout
     while True:
-        digest, replay = replay_digest(client, pane_id, cols, rows)
+        now = time.monotonic()
+        phase_deadline = ready_deadline
+        if first_change_at is not None:
+            phase_deadline = min(phase_deadline, first_change_at + gate_timeout) if deadline else first_change_at + gate_timeout
+        remaining = phase_deadline - now
+        if remaining <= 0:
+            if first_change_at is not None:
+                return latest_replay, ""
+            raise SystemExit(f"wmuxctl: timed out after {timeout:g}s waiting for post-start TUI output")
+        try:
+            digest, replay = replay_digest(client, pane_id, cols, rows, remaining)
+        except (TimeoutError, SystemExit) as error:
+            if not pane_read_timed_out(error):
+                raise
+            if first_change_at is not None:
+                return latest_replay, ""
+            raise SystemExit(f"wmuxctl: timed out after {timeout:g}s waiting for post-start TUI output") from error
         failure = helper_failure(replay, run_id)
         if failure:
             raise SystemExit(f"wmuxctl: interactive helper failed: {failure}")
@@ -1192,11 +1434,10 @@ def wait_for_tui_snapshot(
         now = time.monotonic()
         if first_change_at is not None and now - first_change_at >= gate_timeout:
             return latest_replay, ""
-        elapsed = now - started
-        if first_change_at is None and elapsed >= timeout:
-            raise SystemExit(f"wmuxctl: timed out after {timeout:g}s waiting for post-start TUI output")
-        remaining = timeout - elapsed if first_change_at is None else gate_timeout - (now - first_change_at)
-        time.sleep(min(0.1, max(0, remaining)))
+        next_deadline = ready_deadline
+        if first_change_at is not None:
+            next_deadline = min(next_deadline, first_change_at + gate_timeout) if deadline else first_change_at + gate_timeout
+        time.sleep(min(0.01, max(0, next_deadline - now)))
 
 
 def launch_posix_tui(
@@ -1214,7 +1455,13 @@ def launch_posix_tui(
     request_options: dict[str, Any] | None = None,
 ) -> str:
     launch_run_id = info["runId"]
-    before, _ = replay_digest(client, info["paneId"], cols, rows)
+    deadline = time.monotonic() + ready_timeout
+    try:
+        before, _ = replay_digest(client, info["paneId"], cols, rows, deadline - time.monotonic())
+    except (TimeoutError, SystemExit) as error:
+        if not pane_read_timed_out(error):
+            raise
+        raise SystemExit(f"wmuxctl: timed out after {ready_timeout:g}s reading the pre-helper pane baseline") from error
     submit_line(client, info["paneId"], f"wmux-agent-run tui {launch_run_id}", True, cols, rows)
     ready = wait_for_helper_marker(
         client,
@@ -1225,6 +1472,7 @@ def launch_posix_tui(
         ready_timeout,
         cols,
         rows,
+        deadline,
     )
     request: dict[str, Any] = {
         "runId": launch_run_id,
@@ -1247,6 +1495,7 @@ def launch_posix_tui(
         ready_timeout,
         cols,
         rows,
+        deadline,
     )
     launch_digest = hashlib.sha256(launched.encode()).hexdigest()
     submit_line(client, info["paneId"], f"WMUX_AGENT_TUI_ACK {launch_run_id}", True, cols, rows)
@@ -1259,6 +1508,7 @@ def launch_posix_tui(
         cols,
         rows,
         gate_timeout=gate_timeout,
+        deadline=deadline,
     )
     if gate == "trust":
         if not accept_trust:
@@ -1273,6 +1523,7 @@ def launch_posix_tui(
             cols,
             rows,
             gate_timeout=gate_timeout,
+            deadline=deadline,
         )
         if gate:
             raise SystemExit("wmuxctl: TUI remained at a safety prompt after trust response")
@@ -1337,22 +1588,10 @@ def cmd_tui(client: WmuxClient, args: argparse.Namespace) -> int:
 
 
 def decode_agent_result(output: str, run_id: str) -> tuple[dict[str, Any], int]:
-    payload: dict[str, Any] | None = None
+    payloads = agent_result_records(output, run_id)
+    payload = payloads[-1] if payloads else None
     exit_code: int | None = None
-    for line in clean_terminal_text(output).splitlines():
-        if line.startswith("WMUX_AGENT_RESULT "):
-            encoded = line.removeprefix("WMUX_AGENT_RESULT ")
-            try:
-                candidate = json.loads(base64.b64decode(encoded, validate=True).decode("utf-8"))
-            except (ValueError, UnicodeDecodeError, json.JSONDecodeError):
-                continue
-            if (
-                isinstance(candidate, dict)
-                and candidate.get("runId") == run_id
-                and isinstance(candidate.get("ok"), bool)
-            ):
-                payload = candidate
-            continue
+    for line in visible_terminal_rows(output):
         match = re.fullmatch(r"WMUX_AGENT_DONE ([A-Za-z0-9._-]+) (-?\d+)", line)
         if match and match.group(1) == run_id:
             exit_code = int(match.group(2))
@@ -1387,7 +1626,6 @@ def wait_for_delegation_result(
 ) -> tuple[bool, Any, int, bool, float, str]:
     started = time.monotonic()
     deadline = started + timeout
-    done_pattern = re.compile(rf"(?m)^WMUX_AGENT_DONE {re.escape(run_id)} -?\d+$")
     last_replay_error = ""
     last_status_error = ""
 
@@ -1406,19 +1644,17 @@ def wait_for_delegation_result(
                 client.read_pane_output(pane_id, cols, rows, timeout=min(1, remaining_budget())).get("replay")
                 or ""
             )
-            output = clean_terminal_text(replay)
-            if done_pattern.search(output):
-                try:
-                    payload, exit_code = decode_agent_result(output, run_id)
-                except SystemExit as error:
-                    last_replay_error = str(error)
-                else:
-                    ok = exit_code == 0 and payload.get("ok") is True
-                    detail = payload.get("result") if ok else payload.get("error") or payload.get("result")
-                    outcome = payload.get("outcome")
-                    if outcome not in {"completed", "blocked", "failed"}:
-                        outcome = "completed" if ok else "failed"
-                    return ok, detail, exit_code, False, time.monotonic() - started, outcome
+            try:
+                payload, exit_code = decode_agent_result(replay, run_id)
+            except SystemExit as error:
+                last_replay_error = str(error)
+            else:
+                ok = exit_code == 0 and payload.get("ok") is True
+                detail = payload.get("result") if ok else payload.get("error") or payload.get("result")
+                outcome = payload.get("outcome")
+                if outcome not in {"completed", "blocked", "failed"}:
+                    outcome = "completed" if ok else "failed"
+                return ok, detail, exit_code, False, time.monotonic() - started, outcome
         except (SystemExit, OSError) as error:
             last_replay_error = str(error)
 
