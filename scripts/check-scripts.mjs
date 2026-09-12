@@ -69,7 +69,7 @@ for (const script of [
   "plugins/wmux/scripts/wmux-binding.mjs",
   "plugins/wmux/scripts/wmux-session.mjs",
   "plugins/wmux/scripts/wmux-title.mjs",
-  "plugins/wmux/scripts/wmux-name-ownership.mjs",
+  "plugins/wmux/scripts/wmux-name-observer.mjs",
   "plugins/wmux/scripts/codex-lifecycle.mjs",
   "plugins/wmux/scripts/codex-rpc.mjs",
   "plugins/wmux/scripts/wmux-observer.mjs",

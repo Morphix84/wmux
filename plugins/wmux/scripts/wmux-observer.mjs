@@ -5,6 +5,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { ID, BINDING_ID, api, loadBinding } from "./wmux-binding.mjs";
 import { connectCodexObserver } from "./codex-rpc.mjs";
 import { observeCodexLifecycle } from "./codex-lifecycle.mjs";
+import { runCodexNameObserver } from "./wmux-name-observer.mjs";
 
 export const CODEX_OBSERVER_INTERVAL_MS = 2000;
 const MAX_LIFETIME_MS = 24 * 60 * 60 * 1000;
@@ -15,8 +16,7 @@ const filename = fileURLToPath(import.meta.url);
 // cannot hold a native hook open or leak a binding receipt into another pane.
 export function startCodexObserver(sessionId, bindingId) {
   if (!ID.test(sessionId || "") || !BINDING_ID.test(bindingId || "")) return;
-  const record = loadBinding(sessionId, bindingId);
-  if (!ID.test(record.promptTurnId || "")) return;
+  loadBinding(sessionId, bindingId);
   const child = spawn(process.execPath, [filename, sessionId, bindingId], { detached: true, stdio: "ignore", windowsHide: true });
   child.on("error", () => {}); // Optional integration failure never blocks native Codex.
   child.unref();
@@ -39,6 +39,8 @@ export async function runCodexObserver({ sessionId, bindingId }, {
   signal?.addEventListener("abort", aborted, { once: true });
   try {
     while (!signal?.aborted && now() < deadline) {
+      try { load(sessionId, bindingId); }
+      catch { return { reason: "binding_unavailable" }; }
       // Every iteration resolves the exact receipt. New prompts, another pane,
       // replacement backends, and server restarts cannot inherit this authority.
       let tuple;
@@ -82,5 +84,8 @@ if (process.argv[1] === filename) {
   const controller = new AbortController();
   process.once("SIGTERM", () => controller.abort());
   process.once("SIGINT", () => controller.abort());
-  runCodexObserver({ sessionId, bindingId }, { signal: controller.signal }).catch(() => {});
+  Promise.allSettled([
+    runCodexObserver({ sessionId, bindingId }, { signal: controller.signal }),
+    runCodexNameObserver({ sessionId, bindingId }, { signal: controller.signal }),
+  ]).catch(() => {});
 }

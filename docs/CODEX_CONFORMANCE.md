@@ -1,5 +1,36 @@
 # Codex plain-start conformance matrix
 
+## Current name-mirroring profile — 2026-09-12
+
+Source base: `origin/main` at `20480f6`. Plugin source version: `0.3.0`.
+Selected mode: **native-name-mirror**. This section supersedes the historical
+wmux-owned naming scope below. Bounded Linux test deployment is verified; full
+harness parity is not claimed.
+
+| Area | Current behavior and evidence |
+| --- | --- |
+| Name authority / NAM-02 | Read exact root `Thread.name` using `thread/read`, then mirror; no native set and no competing semantic-name store. MCP/transport tests assert the read-only method allowlist. |
+| Native generation / NAM-01, NAM-03 | Delegated to Codex. wmux mirrors its accepted name and does not choose or rewrite native titles. Semantic quality and native automatic/manual arbitration are not adapter guarantees. |
+| Manual ownership / NAM-04, NAM-06 | Existing server receipt and layout-owner checks preserve independent workspace/tab pins. Real PTY/tmux fixtures cover pinned workspace plus updating tab and pin clearing. Live workspace-pin preservation passed. User-facing independent unpin controls belong to the separate roadmap, outside this PR. |
+| Rename latency / NAM-05, EXT-01 | Two-second idle polling, bounded by an exact live receipt. Production hook/socket/HTTP/PTY/tmux fixtures verify later names after terminal completion, unpin recovery and browser reconnect. No event-subscription claim. |
+| Failure / NAM-08, R18–R20 | Missing/invalid names, stale receipts, wrong roots, socket outages, rejected title delivery and reconnect are tested. No stale cached name is replayed. An explicitly delivered fixture SessionEnd revokes captured receipts while the shell remains alive; later receipts and other roots are protected. This does not certify native event emission on exit. |
+| Desktop/native evidence | Read-only checks found named desktop metadata on two hosts' different supported private routes; one task was active, the other was stored/notLoaded. Cross-host reads were not interchangeable. CLI schema 0.154.0 and live server 0.153.4 were inspected. |
+| Desktop binding limit | Hook output must be observed on a live wmux backend. A desktop-only task with no observed marker has no inferred pane binding. No arbitrary desktop-pairing acceptance claim. |
+| Live Linux acceptance — 2026-09-12 | Test deployment and plugin-only setup on two executing hosts; idle native `/rename`, workspace pin preservation, blocking input → running → completed with one completion notification, browser refresh during work, and user-confirmed clipboard image paste. Audited explicit agent sync calls were no-ops after the observer had already mirrored the name. |
+| Exit investigation — closed by scope | Immediate shared-client `/quit`/disconnect cleanup is excluded from this PR. Client detach does not immediately emit native SessionEnd. Receipts/observers can remain until native SessionEnd, binding/backend replacement, pane closure, or the 24-hour lease cap. No live native SessionEnd acceptance pass is claimed. |
+| Remaining boundaries | User-facing unpin controls are separate roadmap work. No macOS/Windows, automatic successor-turn ownership, exact request set, schedule, browser-answer or full-parity claim. Historical tests below do not certify the new mode. |
+
+Maintained implementation details and commands:
+[CODEX_PLUGIN.md](CODEX_PLUGIN.md). Interface evidence:
+[CODEX_NATIVE_API_GAPS.md](CODEX_NATIVE_API_GAPS.md).
+
+## Historical conformance ledger — 2026-09-06
+
+Everything below records the earlier baselines and experiments. Its selected
+naming modes, matrices and proposed work packages are historical, not current
+instructions. Native-write ownership failures remain evidence against that
+superseded design; they are not failures of the one-way read-only profile.
+
 Status date: 2026-09-06.  This is an evidence ledger for the normative
 [harness integration contract](HARNESS_INTEGRATION_SPEC.md), revision 1.1; it is
 not a certification claim.  Scope is the ordinary interactive `codex` plugin
@@ -44,7 +75,7 @@ It is not full-parity certification. Publication of the narrower capability
 profile below is explicitly approved; the original harness-neutral contract
 remains intact.
 
-## Approved achievable scope
+## Historical approved achievable scope
 
 The approved Codex naming mode is **wmux-owned-name**. The plugin resolves and
 preflights its private title store, then the server atomically accepts the bound

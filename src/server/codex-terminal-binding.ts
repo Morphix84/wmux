@@ -201,6 +201,18 @@ export class CodexTerminalBindingRegistry {
     return tuple;
   }
 
+  revoke(sessionId: unknown, receipts: unknown): void {
+    if (typeof sessionId !== "string" || !sessionIdPattern.test(sessionId)) throw new CodexBindingError(400, "invalid_session_id");
+    if (!Array.isArray(receipts) || receipts.length > MAX_BINDINGS
+      || !receipts.every((receipt) => typeof receipt === "string" && receiptPattern.test(receipt))) {
+      throw new CodexBindingError(400, "invalid_receipts");
+    }
+    for (const receipt of receipts) {
+      const binding = this.byReceipt.get(receiptDigest(receipt));
+      if (binding?.sessionId === sessionId) binding.invalid = true;
+    }
+  }
+
   private prune(now = Date.now()): void {
     for (const [marker, binding] of this.byMarker) {
       if (binding.expiresAtMs > now) continue;
