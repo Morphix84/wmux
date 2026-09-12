@@ -17,11 +17,15 @@ test("observer installer renders quoted special-character paths using a mocked u
   fs.writeFileSync(mock, `#!/bin/sh\nprintf '%s\\n' "$*" >> "$WMUX_TEST_CALLS"\n`, { mode: 0o700 });
   try {
     const script = path.resolve("scripts/install-codex-observer-service.sh");
-    await run("bash", [script], { env: { ...process.env, HOME: home, PATH: `${bin}${path.delimiter}${process.env.PATH}`, WMUX_TEST_CALLS: calls, NODE_BIN: path.join(directory, "node % & |") } });
-    const unit = path.join(home, ".config", "systemd", "user", "wmux-codex-observer.service");
-    const content = fs.readFileSync(unit, "utf8");
-    assert.match(content, /ExecStart=".*node %% & \\|" ".*wmux-observer\.mjs" --service/);
-    assert.equal(fs.readFileSync(calls, "utf8").trim(), "--user daemon-reload");
-    assert.equal(fs.statSync(unit).mode & 0o777, 0o600);
+    // Exercise both supported destinations without inheriting a runner's XDG
+    // directory and accidentally installing the fixture outside this sandbox.
+    for (const configHome of ["", path.join(directory, "config % & |")]) {
+      await run("bash", [script], { env: { ...process.env, HOME: home, XDG_CONFIG_HOME: configHome, PATH: `${bin}${path.delimiter}${process.env.PATH}`, WMUX_TEST_CALLS: calls, NODE_BIN: path.join(directory, "node % & |") } });
+      const unit = path.join(configHome || path.join(home, ".config"), "systemd", "user", "wmux-codex-observer.service");
+      const content = fs.readFileSync(unit, "utf8");
+      assert.match(content, /ExecStart=".*node %% & \\|" ".*wmux-observer\.mjs" --service/);
+      assert.equal(fs.statSync(unit).mode & 0o777, 0o600);
+    }
+    assert.deepEqual(fs.readFileSync(calls, "utf8").trim().split("\n"), ["--user daemon-reload", "--user daemon-reload"]);
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
