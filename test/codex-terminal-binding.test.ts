@@ -23,6 +23,22 @@ const makeRegistry = () => {
   return { registry, live, panes };
 };
 
+test("session-end revocation is receipt-scoped, idempotent and cannot revoke a later binding", () => {
+  const { registry } = makeRegistry();
+  const first = registry.issue("root"), other = registry.issue("other");
+  registry.observe("pane-a", first.marker); registry.observe("pane-b", other.marker);
+  assert.throws(() => registry.revoke("root", [first.receipt, "malformed"]), /invalid_receipts/);
+  assert.equal(registry.resolve("root", first.receipt).paneId, "pane-a");
+  registry.revoke("root", [other.receipt]);
+  assert.equal(registry.resolve("other", other.receipt).paneId, "pane-b");
+  registry.revoke("root", [first.receipt]);
+  assert.throws(() => registry.resolve("root", first.receipt), /binding_not_found/);
+  const next = registry.issue("root"); registry.observe("pane-a", next.marker);
+  registry.revoke("root", [first.receipt]);
+  assert.equal(registry.resolve("root", next.receipt).paneId, "pane-a");
+  assert.equal(registry.resolve("other", other.receipt).paneId, "pane-b");
+});
+
 test("client retention requires a live observed binding to the unchanged pane tuple", () => {
   const { registry, live, panes } = makeRegistry();
   const issued = registry.issue("thread_retained", "turn_retained");
