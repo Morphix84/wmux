@@ -1,10 +1,12 @@
 # M0: reproducible Codex naming baseline
 
-Status: tooling and acceptance procedure implemented; naming-candidate
-qualification and native-client UAT decision are pending. Live UAT identified
-missing workspace/tab unpin controls and a missing tab-reset API; M1 owns their
-planned delivery. CLI exit cleanup remains under investigation. This milestone does not certify
-the concurrent name-sync implementation or authorize M1 to start.
+Status: tooling implemented; PR #126 at `d3be8801f4b3b4e6f6d6ad34de4d66dec4cc34a3`
+is the fixed naming baseline for combined qualification. The user authorized
+M0–M2 implementation and deployment preparation with the observed unpin gap
+carried into M1. Native-client acceptance remains pending. Immediate shared-client
+quit/disconnect cleanup is excluded from the baseline, not accepted; native
+`SessionEnd` delivery on exit is unverified. Use the
+[M1–M2 UAT procedure](CODEX_M1_M2_UAT.md) for the new candidate's reset and recovery tests.
 
 ## Ownership and scope
 

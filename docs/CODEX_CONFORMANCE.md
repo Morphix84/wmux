@@ -6,10 +6,10 @@ The [M0 procedure](CODEX_M0_UAT.md) adds repeatable artifact/schema collection,
 focused qualification commands, and native-client UAT cases. The
 [roadmap](CODEX_INTEGRATION_ROADMAP.md) defines its release gate.
 
-M0 is **pending candidate qualification and native UAT**. The name-sync
-implementation is owned by a separate active workstream; its uncommitted source
-must not be represented as a committed candidate. The collector records that
-distinction and never converts fixture success into native acceptance.
+M0 is **pending combined candidate qualification and native UAT**. Naming PR #126
+is published at `d3be8801f4b3b4e6f6d6ad34de4d66dec4cc34a3` and incorporated into the
+isolated integration branch. The user authorized M0–M2 implementation and rollout
+preparation with the reset gap carried into M1. This is not UAT acceptance.
 
 This section does not supersede the selected profile or acceptance evidence
 maintained by the naming workstream. Attach a clean candidate commit, plugin
@@ -79,16 +79,19 @@ reload persistence, unauthorized requests, unavailable metadata and stale bindin
 handling. Fixtures that directly alter state do not qualify user-facing unpin.
 See [M1 requirements](CODEX_INTEGRATION_ROADMAP.md#m1--explain-integration-state-and-restore-automatic-naming)
 and [M0 UAT cases](CODEX_M0_UAT.md#uat-cases-and-observations).
-M0 remains open for candidate qualification and a user decision explicitly
-recording this gap. Neither unpin nor exit cleanup is accepted; this update
-adds requirements only and does not start M1 implementation.
+M0 remains open for combined candidate qualification and native acceptance.
+Neither unpin nor exit cleanup is accepted. The subsequent M0–M2 authorization
+starts implementation; [M1–M2 UAT](CODEX_M1_M2_UAT.md) records the new checkpoints.
 
-## Current name-mirroring profile — 2026-09-12
+## Naming baseline from PR #126 — 2026-09-12
 
 Source base: `origin/main` at `20480f6`. Plugin source version: `0.3.0`.
-Selected mode: **native-name-mirror**. This section supersedes the historical
+Selected mode: **native-name-mirror**. This baseline section supersedes the historical
 wmux-owned naming scope below. Bounded Linux test deployment is verified; full
-harness parity is not claimed.
+harness parity is not claimed. The current M1–M2 candidate adds reset controls,
+long-name/schema support, diagnostics and Linux observer supervision to this
+baseline. Its engineering and native acceptance gates are recorded in
+[M1–M2 UAT](CODEX_M1_M2_UAT.md); PR #126's live passes do not certify new behavior.
 
 | Area | Current behavior and evidence |
 | --- | --- |

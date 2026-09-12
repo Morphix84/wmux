@@ -28,7 +28,7 @@ export async function runCodexNameObserver({ sessionId, bindingId }, {
           bound = true;
           let name;
           try {
-            client ??= await connect({ threadId: sessionId });
+            client ??= await connect({ threadId: sessionId, ...(current.schemaVersion === 3 ? { socketPath: current.socketPath } : {}) });
             const { thread } = await client.request("thread/read", { threadId: sessionId, includeTurns: false });
             name = nativeTitle(thread, sessionId);
           } catch { close(); return; }

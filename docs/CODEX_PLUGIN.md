@@ -45,9 +45,14 @@ The first layout pane owns its tab's automatic title; the first pane of the
 first tab owns the workspace title. Other splits cannot overwrite those shared
 surfaces. Manual workspace and tab pins are independent and persist until an
 explicit wmux unpin. The next successful sample applies the current native
-name after unpinning, even if Codex has not renamed it again. Independent
-workspace/tab reset controls are separate roadmap work, outside this PR;
-fixture coverage of clearing pins does not establish user-facing unpin support.
+name after unpinning, even if Codex has not renamed it again. In the command
+palette, **Use automatic workspace name** and **Use automatic tab name** reset
+only the selected surface. The workspace rename dialog also offers reset.
+Controls show their target/ownership and acknowledge the change. Until a valid
+sample arrives, default ownership means automatic eligibility/awaiting sync.
+Both existing title routes accept explicit `{ "clear": true }`; ambiguous
+reset/title bodies are rejected, and existing route grants are unchanged.
+Native-client acceptance is recorded separately from browser fixture success.
 
 There are at most 512 memory-only challenges. Unobserved challenges expire after
 60 seconds; observed leases expire within 24 hours of issuance. API calls and
@@ -69,11 +74,13 @@ boundary against another process running as the same trusted user.
 ## Native metadata and desktop boundaries
 
 The name observer polls `thread/read` with the exact thread ID and
-`includeTurns: false` every two seconds after a successful binding. It accepts
-only that root thread's printable, nonempty `name`. Names exceeding wmux's
-80 UTF-16-unit title limit, control characters, or whitespace that wmux would
-normalize are skipped instead of silently changed. Missing names leave the
-current title intact until a representable name appears.
+`includeTurns: false` on a nominal two-second cadence after successful binding.
+It accepts only that root's printable, nonempty name, bounded by both 512 grapheme
+clusters and 4,096 UTF-16 code units. Accepted native whitespace/punctuation is
+preserved exactly. Larger/invalid names are skipped with a diagnostic; missing
+names retain the current title. Presentation uses shorter grapheme-safe labels
+with accessible full names. State schema 10 migrates prior names/pins unchanged;
+an older server requires its pre-upgrade snapshot for rollback.
 
 Polling continues after turn completion until SessionEnd, revocation or expiry.
 An unavailable native socket closes that connection; subsequent samples reconnect
@@ -164,14 +171,50 @@ than being masked by a second reporter. Manual pins are never reset during upgra
 Credentials retain existing private-network, scoped-helper, file-rotation and
 no-redirect rules. An empty/missing configured helper credential does not fall
 back to broad authority. Receipt records are private, schema-validated, atomic
-and bounded under `~/.wmux/codex-plugin`. A hard-killed process may leave a
-per-thread lock; verify no operation is running before removing that exact lock.
+and bounded under `~/.wmux/codex-plugin`. Version 3 receipts capture their native
+socket selection and persist lifecycle sequence numbers. Legacy version 2
+receipts lack an endpoint and are excluded from unattended supervision; obtain
+fresh terminal proof after upgrade. Explicit legacy MCP operations remain
+compatible. Linux `flock` on parent-held descriptors releases serialization when
+an observer dies. Lock inodes are retained; do not delete a live lock file.
+Malformed legacy lock files fail closed and require an operator to verify that
+the old wmux observer is stopped before retiring the incompatible artifact.
 
-Lifecycle polling remains separate: it requires the hook's exact native
+Lifecycle authority remains separate: it requires the hook's exact native
 `turn_id`, reads bounded metadata and reports active/aggregate attention/terminal
-states without native control. Its worker stops at the exact turn's terminal
-outcome while name polling continues. Missing authoritative activity becomes
+states without native control. Once a terminal outcome is accepted, continued
+name sampling does not create another outcome. Missing authoritative activity becomes
 status unknown. This is not a scheduler or a browser question-answer bridge.
+
+### Linux observation supervision and diagnostics
+
+`scripts/install-codex-observer-service.sh` stages the wmux-owned
+`wmux-codex-observer.service` user unit, without starting it. Start/enable it as
+part of the authorized wmux rollout. Node.js 22+, Linux `flock`, existing wmux
+helper authorization and readable private native sockets are prerequisites.
+The unit restarts failed workers and scans while idle; hooks also start a
+singleton fallback worker, whose crash recovery requires the supervised profile.
+No native service/configuration is installed or modified by the script.
+
+The sampler considers at most 512 private receipts, selecting up to twenty
+roots per cycle with four concurrent sampling jobs. Connections are scoped to
+the exact selected roots of each recorded endpoint; unused connections close.
+Larger inventories rotate fairly with correspondingly slower per-task cadence.
+Endpoint failures back off independently, capped at thirty seconds plus jitter.
+Healthy cycles retain the nominal two-second interval plus bounded request time;
+the server's thirty-second activity confidence limit is unchanged. This does
+not qualify an overloaded/failing twenty-task deployment as meeting a latency SLO.
+
+Receipt-scoped observation reports feed `/api/doctor` and the on-demand session
+inspector. They distinguish naming, activity, native transport, terminal proof,
+manual ownership, age, expiry and bounded counters. Compatibility is explicitly
+unverified when no matching native version evidence exists. Diagnostics reveal
+neither receipts nor native endpoint paths and never grant native control.
+An expired/unavailable binding requires fresh terminal proof; socket recovery
+alone is sufficient only while the binding remains live.
+
+See [M1–M2 UAT and rollout](CODEX_M1_M2_UAT.md) for fault injection, the actual
+24-hour soak and rollback. These acceptance rows remain open until recorded.
 
 ## Validation and limits
 
@@ -207,7 +250,8 @@ before the agent's explicit sync calls, which were no-ops.
 The exit investigation is closed by scope: immediate shared-client `/quit`
 cleanup is excluded, not a passing acceptance result. Native SessionEnd emission
 has not been live-certified; the receipt cleanup handler has fixture coverage.
-User-facing unpin controls remain separate roadmap work. macOS/Windows acceptance
+User-facing unpin controls have engineering fixtures; native-client UAT remains
+pending. Linux supervised observation is the M2 target; macOS/Windows acceptance
 and arbitrary desktop pairing are unclaimed. Windows Unix-socket observation is
 unsupported.
 The [conformance ledger](CODEX_CONFORMANCE.md) retains the older native-write and

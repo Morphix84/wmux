@@ -83,12 +83,19 @@ test("pending markers expire without native reads and removed local bindings sto
   assert.deepEqual(f.reads, []);
 });
 
-test("child, mismatched identity, overlong and unsafe names never reach title writes", async () => {
-  for (const change of [{ parentThreadId: "parent" }, { id: "different" }, { name: "x".repeat(81) }, { name: "Bad\u001bName" }]) {
+test("child, mismatched identity, unrepresentable and unsafe names never reach title writes", async () => {
+  for (const change of [{ parentThreadId: "parent" }, { id: "different" }, { name: "x".repeat(4097) }, { name: "Bad\u001bName" }]) {
     const f = fixture(); Object.assign(f.state, { name: "Name" }, change);
     await runCodexNameObserver({ sessionId, bindingId }, { ...f.dependencies, sleep: async () => { f.state.live = false; } });
     assert.deepEqual(f.titles, []);
   }
+});
+
+test("long bounded native names are mirrored without shortening", async () => {
+  const f = fixture();
+  f.state.name = "🧪".repeat(512);
+  await runCodexNameObserver({ sessionId, bindingId }, { ...f.dependencies, sleep: async () => { f.state.live = false; } });
+  assert.deepEqual(f.titles.map((title) => title.title), [f.state.name]);
 });
 
 test("manual unpin recovers even when the native name has not changed", async () => {

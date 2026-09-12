@@ -48,7 +48,7 @@ See [retro boot fidelity](docs/RETRO_BOOT_FIDELITY.md) for historical references
 | HTTP transport | Declarative route table with stable route ids, exact method/path matching, body limits, authorization policy, request dispatch, static delivery, event publication, and WebSocket upgrades |
 | Node.js service | Private-network boundary, bearer authentication, bounded REST uploads, event WebSocket, and canonical workspace state |
 | Agent sessions | `AgentSessionService` owns persisted delegation transitions and side effects; the versioned timeline store retains prompts, outcomes, touched files, and archived working-tree snapshots; Codex, Claude, and OpenCode adapters own runtime-specific TUI and optional headless behavior |
-| Optional Codex wmux plugin | A trusted prompt hook emits a short-lived marker; wmux's live backend binds its private receipt and native turn to the pane without inherited pane variables. A plugin-owned observer reads the exact native conversation name through an existing private Unix App Server socket and mirrors it one way to eligible wmux titles, including idle renames; manual wmux pins remain intact. A separate turn-bound observer sends activity to `AgentSessionService`; neither observer drives Codex or answers requests. A server watchdog withdraws stale activity. Binding leases are memory-only; restart requires a new prompt. See the conformance matrix for unverified and missing capabilities. |
+| Optional Codex wmux plugin | A trusted prompt hook emits a short-lived marker; the live backend binds its private receipt and native turn to the pane. Native names remain canonical; workspace/tab reset controls independently restore automatic eligibility. The Linux wmux-owned observer user service supervises a bounded sampler with connections scoped to each receipt's existing private native socket and exact roots. It mirrors names and reports prompt-bound activity without driving Codex or answering requests. Kernel locks serialize plugin reads/writes; the server withdraws stale activity. Binding authority is memory-only; wmux server restart requires fresh terminal proof. See the conformance matrix for acceptance limits. |
 | Session manager | One live client per pane, persisted registered-host disposal snapshots, temporary image staging, bounded replay, VT checkpoints, resize ownership, and dispatch through the shared `SessionBackend` contract |
 | Machine catalog | Merges static `wmux.config.json` machines with dynamically registered heartbeat hosts |
 | Execution backends | Raw PTY, durable `tmux`/`screen`, and native session-agent adapters; POSIX and Windows agents own pane processes, replay, dynamic-registration heartbeat, and view-only capture supervision |
@@ -590,8 +590,12 @@ Its selected naming mode is **native-name-mirror**: Codex automatic names and la
 desktop/CLI renames are read through an existing private App Server socket and
 mirrored to eligible wmux surfaces. The plugin never writes native names or uses
 a separate semantic-name store. A two-second poll continues while idle and
-reapplies the current native name when a manual pin is cleared. User-facing
-workspace/tab reset controls remain separate roadmap work.
+reapplies the current native name when a manual pin is cleared. The command
+palette provides **Use automatic workspace name** and **Use automatic tab name**
+on desktop/mobile; each action identifies its target and preserves the other pin.
+Doctor and the session inspector show binding/observation health and sample age.
+The Linux supervised profile adds a wmux-owned user service for idle worker
+recovery; see [M1–M2 qualification and rollout](docs/CODEX_M1_M2_UAT.md).
 Each prompt emits a small visible binding marker; the live backend must observe
 it. No terminal focus, cwd or recent-session search determines the target.
 Desktop-only tasks without an observed marker have no automatic wmux binding.

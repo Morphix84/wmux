@@ -1,8 +1,11 @@
 # Codex integration roadmap
 
-Status: M0 acceptance tooling/procedure implemented; naming-candidate
-qualification and native-client UAT pending. Live UAT found missing user-facing
-unpin/reset support; its delivery is assigned to M1. M1–M6 remain proposed.
+Status: M0–M2 implementation and candidate preparation authorized on 2026-09-12;
+engineering qualification and native-client UAT are separate gates. Naming
+[PR #126](https://github.com/gisenberg/wmux/pull/126) is the fixed baseline at
+`d3be8801f4b3b4e6f6d6ad34de4d66dec4cc34a3`. M1 closes the observed unpin gap;
+M2 adds bounded recovery. M3–M6 remain proposed. Unpin, immediate CLI exit cleanup,
+and the M2 24-hour soak are not accepted by authorization to implement.
 Updated: 2026-09-12.
 
 ## Objective and boundary
@@ -42,13 +45,16 @@ capabilities must produce an explicit unavailable/unknown state.
 Each milestone must be useful independently. M1–M4 can ship without M5.
 UAT occurs against a concrete, versioned wmux candidate after engineering checks;
 it is not deferred until the final milestone. Record accept/rework/defer before
-promoting the milestone or building dependent behavior on an unresolved result.
+promoting a milestone. The user authorized building M0–M2 together with the M0
+unpin gap carried into M1; this allows implementation to proceed without treating
+the missing behavior as accepted. The [M1–M2 UAT and rollout procedure](CODEX_M1_M2_UAT.md)
+keeps their deployment and acceptance checkpoints explicit.
 Do not estimate dates until the candidate baseline and target UAT hosts are set.
 
 ## M0 — Establish the naming baseline
 
 Execution procedure: [CODEX_M0_UAT.md](CODEX_M0_UAT.md). Candidate qualification
-waits for the separate name-sync workstream's committed revision. M0 tooling
+uses PR #126's committed revision. M0 tooling
 must not stage or overwrite that workstream's in-progress source changes.
 
 Deliverables:
@@ -77,9 +83,11 @@ title API already accepts reset, but the tab title API has no clear/reset
 operation. Manual workspace pin preservation passed; user-facing independent
 unpin did not. M0 N05–N07 must record the reset portions as blocked by missing
 product support, not passed via direct state edits. M1 closes this explicit gap;
-moving the implementation there does not accept or waive it. The UAT owner must
-record a baseline decision with that deferred scope before dependent milestone
-work starts. CLI exit cleanup is separately under investigation and unaccepted.
+moving the implementation there does not accept or waive it. The user subsequently
+authorized M0–M2 execution while carrying this gap into M1. Immediate shared-client
+quit/disconnect cleanup is excluded by PR #126 because client detach does not
+immediately emit native `SessionEnd`; neither that behavior nor native event
+delivery on exit is accepted. Delivered-event cleanup retains fixture coverage.
 
 ## M1 — Explain integration state and restore automatic naming
 
