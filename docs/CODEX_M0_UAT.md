@@ -68,6 +68,12 @@ changes during capture the collector fails rather than combining revisions.
 If code changes after engineering/UAT evidence, identify which checks are
 invalidated and rerun them for the replacement candidate.
 
+For final qualification, incorporate the naming workstream's published commit
+into an isolated M0 candidate, resolve documentation/package additions, and
+commit/push the combined revision before remote verification. Do not reconstruct
+it by copying uncommitted runtime files. The separate-source collector is useful
+before that integration, but tests run against the checkout that executes them.
+
 ## Automated qualification
 
 ```sh

@@ -30,6 +30,20 @@ those configuration differences or identify a compiled running build. Preserve
 the private capture and reconcile them with the naming workstream's final
 candidate. None of this establishes live rename propagation or UAT acceptance.
 
+M0 toolkit engineering evidence at `1d79a3e0a759e662618913c8dcea889d6facf751`
+(base `20480f6`, older naming profile): 84 focused checks passed locally. An
+isolated external Linux runner passed `npm run check`: 1,088 tests passed,
+four skipped, zero failures, followed by type checks, generated/script checks,
+and production build. These results qualify the toolkit on its stated base;
+rerun against the combined naming candidate before native-name acceptance.
+
+The same external candidate passed all four focused Chromium desktop/mobile
+checks in `codex-sidebar-lifecycle.spec.ts` and `codex-durable-reconnect.spec.ts`.
+These injected-data browser fixtures exercised live durable-pane reconnect and
+status chrome; they did not launch native Codex. The verification workspaces
+were closed after evidence capture. Native N01–N11 observations and the user's
+accept/rework/defer decision remain pending.
+
 Status date: 2026-09-06.  This is an evidence ledger for the normative
 [harness integration contract](HARNESS_INTEGRATION_SPEC.md), revision 1.1; it is
 not a certification claim.  Scope is the ordinary interactive `codex` plugin
