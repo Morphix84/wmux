@@ -41,8 +41,47 @@ The same external candidate passed all four focused Chromium desktop/mobile
 checks in `codex-sidebar-lifecycle.spec.ts` and `codex-durable-reconnect.spec.ts`.
 These injected-data browser fixtures exercised live durable-pane reconnect and
 status chrome; they did not launch native Codex. The verification workspaces
-were closed after evidence capture. Native N01–N11 observations and the user's
-accept/rework/defer decision remain pending.
+were closed after evidence capture. Subsequent native observations are recorded
+below; full N01–N11 qualification and the user's accept/rework/defer decision
+remain pending.
+
+### Coordinated native UAT follow-up — 2026-09-12
+
+Reviewed the private follow-up report `wmux-live-20260912/README.md` and the
+naming workstream's ignored
+`test-results/native-name-mirror-20260911/integration-session-verification-20260912.json`.
+These are live evidence on an uncommitted deployment, not a new qualified source
+revision. Preserve precise task/pane mappings and personal titles privately.
+
+| Area | Evidence and decision |
+| --- | --- |
+| Native blocking input and notifications | Live waiting → running → completed and one input/one completion notification recorded; waiting indicator user-confirmed. Scoped live pass, not blanket approval/request conformance. |
+| Idle native rename | User-confirmed and subsequent live title reads matched. Scoped live pass; candidate qualification pending. |
+| Active browser refresh | User-confirmed titles/running state survived. Does not establish every-viewer disconnect or every backend case. |
+| Workspace manual pin | Manual workspace name stayed fixed while native name and automatic tab changed together. Preservation passed; no unpin performed. |
+| Workspace reset | Existing authorized workspace title route accepts `{ clear: true }`, but no browser unpin control was available. User-facing N05 reset is missing/unaccepted. |
+| Tab reset | Existing tab title route sets a manual title and has no clear/reset operation; browser control also missing. N06–N07 reset is missing/unaccepted. |
+| CLI exit cleanup | Partial: shell/pin survived; observer disappearance overlapped new activity and stale receipt rejection was checked after reopening. Local binding record remained. N09 is under separate investigation, not accepted. |
+| Clipboard image paste | User-confirmed in the primary evidence; not proof of text clipboard, media playback or mobile parity. |
+| Legacy hooks | Coordination reports all three legacy Codex wmux hooks removed on both Linux execution hosts. No hook/config changes made by M0 tooling. |
+
+**Roadmap decision:** assign independent workspace AND tab unpin/reset to M1,
+including accessible desktop/mobile controls and the existing authorized title
+routes. Workspace reset reuses its explicit clear operation; tab reset requires
+an explicit clear operation and state transition. Preserve the other surface's
+pin and persist automatic eligibility. With a healthy live binding, the observer
+must apply the current native name on its next normal sample even while idle
+and without another rename. Unavailable metadata or stale bindings must leave
+reset ownership intact but synchronization pending, without reviving authority.
+
+Acceptance requires supported UI/API paths for independent/both pins, idle reset,
+reload persistence, unauthorized requests, unavailable metadata and stale binding
+handling. Fixtures that directly alter state do not qualify user-facing unpin.
+See [M1 requirements](CODEX_INTEGRATION_ROADMAP.md#m1--explain-integration-state-and-restore-automatic-naming)
+and [M0 UAT cases](CODEX_M0_UAT.md#uat-cases-and-observations).
+M0 remains open for candidate qualification and a user decision explicitly
+recording this gap. Neither unpin nor exit cleanup is accepted; this update
+adds requirements only and does not start M1 implementation.
 
 Status date: 2026-09-06.  This is an evidence ledger for the normative
 [harness integration contract](HARNESS_INTEGRATION_SPEC.md), revision 1.1; it is

@@ -1,7 +1,8 @@
 # Codex integration roadmap
 
 Status: M0 acceptance tooling/procedure implemented; naming-candidate
-qualification and native-client UAT pending. M1–M6 remain proposed.
+qualification and native-client UAT pending. Live UAT found missing user-facing
+unpin/reset support; its delivery is assigned to M1. M1–M6 remain proposed.
 Updated: 2026-09-12.
 
 ## Objective and boundary
@@ -31,7 +32,7 @@ capabilities must produce an explicit unavailable/unknown state.
 | Milestone | User-visible result | Dependency | UAT checkpoint |
 | --- | --- | --- | --- |
 | M0 — Establish baseline | Current naming behavior has a reproducible acceptance record | None | Native names, pins, reconnect, and known limitations |
-| M1 — Explain integration state | Doctor/inspector explains naming and activity health; long names display correctly | M0 | Understand and recover from common configuration/observation failures |
+| M1 — Explain and restore automatic naming | Doctor/inspector explains health; long names display correctly; workspace and tab can independently return to automatic naming | M0 baseline decision with unpin gap explicitly recorded | Accessible reset controls, independent pins, idle convergence, reload and failure recovery |
 | M2 — Recover observation | wmux observation survives its own worker failures and uses bounded resources | M1 | Fault injection and an overnight soak |
 | M3 — Discover native tasks | Task inventory includes native tasks without terminal panes | M2 | Desktop, CLI, stored, and background task visibility |
 | M4 — Associate and inspect | Explicit display associations and useful native task details | M3 | Move associations, reconnect, and inspect related tasks without affecting execution |
@@ -71,7 +72,16 @@ Exit: native-client tests are distinguished from socket fixtures, supported
 client paths are explicit, and any failure has a reproducible case. Existing
 restart/lease limitations are documented rather than counted as new regressions.
 
-## M1 — Explain integration state and display full native names
+Live UAT gap (2026-09-12): no browser unpin control was available. The workspace
+title API already accepts reset, but the tab title API has no clear/reset
+operation. Manual workspace pin preservation passed; user-facing independent
+unpin did not. M0 N05–N07 must record the reset portions as blocked by missing
+product support, not passed via direct state edits. M1 closes this explicit gap;
+moving the implementation there does not accept or waive it. The UAT owner must
+record a baseline decision with that deferred scope before dependent milestone
+work starts. CLI exit cleanup is separately under investigation and unaccepted.
+
+## M1 — Explain integration state and restore automatic naming
 
 Deliverables:
 
@@ -85,14 +95,61 @@ Deliverables:
   an explicit maximum and visible handling for larger names; retain control
   character validation and never split a Unicode grapheme in display text.
 - Specify persistence/wire migrations and preserve existing manual title values.
+- Add accessible actions named **Use automatic workspace name** and **Use
+  automatic tab name** in the corresponding desktop and mobile surface controls.
+  Show the current ownership and exact target; support keyboard activation,
+  screen-reader labels, visible focus, touch, and result/error feedback. Reset
+  only after the user invokes that surface's action; opening a menu or a native
+  rename must never remove a pin.
+- Reuse `POST /api/workspaces/:workspaceId/title` with `{ "clear": true }` for
+  workspace reset. Extend the existing
+  `POST /api/workspaces/:workspaceId/tabs/:tabId/title` route with the same
+  explicit reset form and a dedicated state clear operation for the selected
+  tab. Both route bodies must distinguish reset from setting a manual title;
+  reject ambiguous/invalid requests instead of interpreting an empty title as
+  unpin. This is planned API work, not a claim that tab reset already exists.
+- Preserve existing route authorization: normal browser authorization on both;
+  scoped automation/helper grants on workspace title, scoped automation on tab
+  title. Do not grant helper credentials tab-reset authority, broaden routes,
+  or add reset authority to the read-only naming MCP tools. Add real-server
+  route-policy checks for valid, invalid and unauthorized reset requests.
+- Persist only the selected surface's ownership transition from `user` to
+  automatic eligibility (`default` until an accepted automatic sample sets
+  `auto`). Preserve the other surface's pin/title, layout-owner rules and task
+  identity. Repeated reset is ownership-idempotent. Publish the resulting state
+  to connected browsers and retain it across reload/restart. Until a valid
+  sample arrives, show an explicitly provisional surface fallback, not a stale
+  cached native name claimed as synchronized.
+- With a live binding and available metadata, the observer must restore the
+  **current** native name on the next normal sample (currently two seconds plus
+  request/delivery time), including while idle and without another rename or
+  prompt. Unpin is not native renaming and must not revive stale/expired binding
+  authority. If metadata is unavailable or the binding is stale, save the reset,
+  show automatic-but-awaiting-sync status, and keep native work usable. Socket
+  recovery may converge through a still-live binding; stale bindings require
+  fresh terminal proof before any automatic title write.
+
+Engineering gate for reset: test each pin independently and both together,
+workspace/tab API and state transitions, exact-target authorization, repeated
+reset, idle reset without a new rename, current-name selection after a rename
+while pinned, reload persistence, unavailable metadata, stale/expired bindings,
+and a delayed sample after the user pins the surface again. Browser tests must
+activate the real controls and traverse the authorized routes. Direct state
+mutation fixtures establish only internal behavior, not user-facing acceptance.
 
 UAT: long and Unicode names on desktop/mobile; pinned surfaces; an unnamed task;
-and controlled unavailable/missing-capability fixtures. A user should be able to
+and controlled unavailable/missing-capability fixtures. Complete M0 N05–N07's
+reset portions through the actual desktop/mobile controls, first while idle,
+then across reload and an unavailable/stale binding. Confirm the other pin stays
+intact and current-name convergence requires no new native rename or prompt.
+A user should be able to
 identify the problem and the appropriate existing recovery action without logs.
 No restart of a live shared native service is required to simulate an outage.
 
-Exit: diagnosis is specific, title rendering is usable, and no error state
-overwrites a manual title or exposes credentials/receipts.
+Exit: diagnosis is specific, title rendering is usable, both reset actions have
+user-facing acceptance evidence, and no error state overwrites another manual
+pin or exposes credentials/receipts. Record unpin acceptance separately from
+CLI exit-cleanup acceptance; success in either does not establish the other.
 
 ## M2 — Make wmux observation recoverable and bounded
 

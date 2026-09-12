@@ -1,7 +1,9 @@
 # M0: reproducible Codex naming baseline
 
 Status: tooling and acceptance procedure implemented; naming-candidate
-qualification and native-client UAT are pending. This milestone does not certify
+qualification and native-client UAT decision are pending. Live UAT identified
+missing workspace/tab unpin controls and a missing tab-reset API; M1 owns their
+planned delivery. CLI exit cleanup remains under investigation. This milestone does not certify
 the concurrent name-sync implementation or authorize M1 to start.
 
 ## Ownership and scope
@@ -146,15 +148,22 @@ without recording the actual eventual outcome and endpoint health.
 
 ## UAT cases and observations
 
+The actions below are acceptance requirements, not a statement that every
+control currently exists. Live UAT on 2026-09-12 found no browser unpin control
+and no tab clear/reset route. N05's pin-preservation portion has live evidence;
+the reset portions of N05–N07 remain blocked by missing product support.
+Do not replace them with persisted-state edits or direct state-method calls.
+N09 remains partial/unaccepted pending an exit-only observation interval.
+
 | ID | User action | Expected result |
 | --- | --- | --- |
 | N01 | Submit the harmless prompt in A; wait for native automatic naming | Eligible wmux workspace/tab equal the native name; B unchanged. If native naming never occurs, record that fact without inventing a name. |
 | N02 | Rename A through the native CLI's ordinary rename control | wmux mirrors the accepted native name; no new model prompt is required. |
 | N03 | Finish the turn, then rename while idle | Native metadata and wmux titles converge without another turn; idle is not fabricated completion evidence. |
 | N04 | Rename the same task through the supported desktop path | Mirrors once the configured endpoint exposes the name; record client/endpoint support or mark unverified. |
-| N05 | Pin only the wmux workspace, then rename natively | Workspace pin stays; eligible task tab updates. Unpin workspace without another native rename; it converges to the current name. |
-| N06 | Pin only the task tab, then rename natively | Tab pin stays; eligible workspace updates. Unpin the tab and verify convergence without another rename. |
-| N07 | Pin both surfaces, rename natively, then unpin one at a time | Each surface obeys its own pin, and B remains unchanged throughout. |
+| N05 | Pin only the wmux workspace, then rename natively; invoke **Use automatic workspace name** while idle | Workspace pin stays before reset; eligible task tab updates. The supported browser action calls the authorized workspace title route with `{ "clear": true }`; the next normal sample restores the current name without another rename or prompt. Pin preservation observed; browser reset currently missing. |
+| N06 | Pin only the task tab, then rename natively; invoke **Use automatic tab name** while idle | Tab pin stays before reset; eligible workspace updates. The planned browser action calls the existing authorized tab title route with explicit clear/reset semantics, returning just this tab to automatic eligibility. Next normal sample restores the current name without another rename. Tab reset API/control currently missing. |
+| N07 | Pin both surfaces, rename natively, then reset each independently through desktop/mobile controls | Each action preserves the other pin and B. Reload after each reset and verify ownership persists. Repeat with unavailable metadata and stale binding: reset persists, awaiting-sync is visible, no stale authority is revived, and recovery uses current metadata only after valid terminal proof. Currently unaccepted; M1 must supply real controls/routes. |
 | N08 | Disconnect every browser viewer, then reopen the same durable pane | Same live backend and receipt remain valid; native name/pins are preserved and later idle rename still mirrors. |
 | N09 | Exit Codex normally while keeping its shell alive | SessionEnd revokes its receipt. A later native metadata rename, if possible through an existing client, must not retitle that shell. If unavailable, record revocation proof separately from fixture-only late-rename evidence. |
 | N10 | Use the desktop-only disposable task without terminal proof | It remains unbound; no existing wmux title is selected by cwd, focus, or recency. |
@@ -165,6 +174,50 @@ endpoint type/version evidence, exact privately recorded task/pane mapping,
 action, native metadata outcome, visible workspace/tab values and ownership,
 timings, evidence path, and pass/fail/unverified decision. Add a sanitized
 failure reproduction for any mismatch; do not turn an unverified row into pass.
+
+For N05–N07 after M1, exercise keyboard/screen-reader and touch access to both
+actions. Verify exact-target request authorization, persisted ownership, actual
+route responses, and both visible surfaces. Reset one surface while the other
+is pinned, then reverse; also pin again while a sample is in flight. Assert
+convergence on the next normal sample, currently two seconds plus transport
+time, when binding/metadata are healthy. The broader 10-second diagnostic
+window above is not permission to lengthen the normal sample interval.
+
+With unavailable native metadata, an authorized reset can succeed independently
+of synchronization. Show automatic-but-awaiting-sync status and a provisional
+fallback; do not report native-name convergence. With a stale binding, require
+fresh terminal proof. No new prompt is needed for a healthy, already-live idle
+binding. These cases need supported UI/API evidence; mocked or directly edited
+state is not an unpin UAT pass.
+
+## Coordinated live evidence — 2026-09-12
+
+The private follow-up report `wmux-live-20260912/README.md` records a native
+blocking input transition through waiting → running → completed, with one input
+and one completion notification; idle rename and active browser refresh were
+user-confirmed. Workspace manual ownership was preserved while the automatic
+tab followed the changed native name. This is pin-preservation evidence, not
+reset evidence. Active refresh also does not by itself cover N08's every-viewer
+disconnect and exact-backend assertions.
+
+The naming workstream's ignored
+`test-results/native-name-mirror-20260911/integration-session-verification-20260912.json`
+contains earlier name/lifecycle observations and the user's clipboard image
+paste confirmation. Later follow-up observations supersede only the cases they
+actually exercised. Coordination reports removal of all three legacy Codex
+wmux hooks on both Linux execution hosts; this milestone performed no removals.
+
+Exit observations are partial: the pane and workspace pin survived, but observer
+disappearance coincided with new pane activity, and stale receipt rejection was
+checked only after reopening. A retained local binding file does not prove live
+server authority. The separate exit-cleanup investigation must establish an
+exit-only interval, timestamped shell return, observer/local-record cleanup and
+server receipt rejection before N09 can pass. Do not mark exit cleanup accepted.
+
+Keep exact task/pane IDs, personal titles and absolute deployment/evidence paths
+in the private reports, not in committed notes. The naming changes remain
+uncommitted; these live observations do not supply a new candidate SHA or an M0
+acceptance decision.
 
 ## Known limits and exit gate
 
@@ -181,6 +234,12 @@ engineering checks, and completed UAT observations or explicit deferred scope.
 The user/UAT owner records **accept**, **rework**, or **defer**. No automatic
 collection command grants acceptance. Wrong-task writes, overwritten manual
 pins, unintended input, or false completion block the affected scope.
+
+For any limited M0 baseline decision, explicitly record workspace/tab reset as
+an open product gap assigned to M1 and exit cleanup as a separate pending
+investigation. This roadmap allocation is not a waiver, acceptance, or current
+authorization to implement M1. Revisit N05–N07 after M1 supplies supported user
+actions; preserve N09's independent decision.
 
 On completion, close only the recorded disposable panes, archive disposable
 native tasks through normal client controls if requested, and retain private
