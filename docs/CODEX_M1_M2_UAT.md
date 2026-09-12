@@ -8,6 +8,16 @@ must be recorded separately. The naming baseline is
 isolated from integration work. See [M0 UAT](CODEX_M0_UAT.md) and the
 [roadmap](CODEX_INTEGRATION_ROADMAP.md) for the original requirements.
 
+Implementation is reviewed in [PR #127](https://github.com/gisenberg/wmux/pull/127).
+The full external POSIX `npm run check` passed at
+`48a02b40e3807d247363e846df7423482c82af3b` (1,116 passed, four skipped).
+Hosted CI then exposed an installer fixture inheriting `XDG_CONFIG_HOME`;
+`e1b85c4` isolates that fixture and tests both supported configuration locations.
+It changes no runtime artifact. Record final browser/hosted checks against their
+actual revision in the private release evidence and PR validation record; the
+earlier check alone does not certify a later runtime change. No rows below have
+native UAT acceptance merely because their engineering fixture passes.
+
 ## Candidate contents and preflight
 
 Qualify a clean, pushed integration commit containing the server, browser,

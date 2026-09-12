@@ -1,12 +1,24 @@
 # Codex integration roadmap
 
-Status: M0–M2 implementation and candidate preparation authorized on 2026-09-12;
+Status: M0–M2 implementation is available in
+[PR #127](https://github.com/gisenberg/wmux/pull/127) for deployment preparation;
 engineering qualification and native-client UAT are separate gates. Naming
 [PR #126](https://github.com/gisenberg/wmux/pull/126) is the fixed baseline at
 `d3be8801f4b3b4e6f6d6ad34de4d66dec4cc34a3`. M1 closes the observed unpin gap;
 M2 adds bounded recovery. M3–M6 remain proposed. Unpin, immediate CLI exit cleanup,
 and the M2 24-hour soak are not accepted by authorization to implement.
 Updated: 2026-09-12.
+
+| Implemented milestone | Deployment acceptance still required |
+| --- | --- |
+| M0 | Artifact/capability collector and conformance ledger delivered; repeat native smoke against the deployed candidate |
+| M1 | Independent workspace/tab reset controls, title persistence/display and diagnostics delivered; desktop/mobile idle unpin and failure UAT pending |
+| M2 | Bounded Linux observation worker and wmux-owned supervision delivered; native fault UAT and the actual 24-hour soak pending |
+
+The candidate is staged separately from the active release. Consult PR #127's
+checks for the qualified revision and the private release manifest for built
+artifact identity. No live deployment, native service change, unpin acceptance,
+or immediate CLI exit-cleanup acceptance follows from this implementation status.
 
 ## Objective and boundary
 
