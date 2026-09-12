@@ -1,5 +1,9 @@
 # Codex wmux plugin
 
+For reproducible candidate identification and the next native-client acceptance
+gate, use the [M0 UAT procedure](CODEX_M0_UAT.md). The collector can inspect a
+separate naming candidate without modifying its checkout or native configuration.
+
 The [harness integration behavior contract](HARNESS_INTEGRATION_SPEC.md) defines
 the expected user experience and shared regression cases. This guide describes
 the current Codex implementation, not complete conformance. See the contract's

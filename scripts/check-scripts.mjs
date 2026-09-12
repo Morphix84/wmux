@@ -59,6 +59,7 @@ run(python.command, [
 for (const script of [
   "scripts/wmux-hooks",
   "scripts/verify-remote.mjs",
+  "scripts/codex-baseline.mjs",
   "scripts/verification-runner.cjs",
   "scripts/wmux-agent-input-broker",
   "scripts/wmux-moonlight-gateway",

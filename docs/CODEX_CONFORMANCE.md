@@ -1,5 +1,35 @@
 # Codex plain-start conformance matrix
 
+## M0 acceptance tooling — 2026-09-12
+
+The [M0 procedure](CODEX_M0_UAT.md) adds repeatable artifact/schema collection,
+focused qualification commands, and native-client UAT cases. The
+[roadmap](CODEX_INTEGRATION_ROADMAP.md) defines its release gate.
+
+M0 is **pending candidate qualification and native UAT**. The name-sync
+implementation is owned by a separate active workstream; its uncommitted source
+must not be represented as a committed candidate. The collector records that
+distinction and never converts fixture success into native acceptance.
+
+This section does not supersede the selected profile or acceptance evidence
+maintained by the naming workstream. Attach a clean candidate commit, plugin
+hash, matching deployment/build evidence, engineering results, and per-case UAT
+decisions before recording M0 accepted.
+
+Provisional read-only checkpoint on 2026-09-12: installed CLI and default daemon
+both reported `0.154.0`. The production observation transport read an explicitly
+selected active desktop root's metadata and found a native name. The generated
+CLI schema exposes metadata-only reads, bounded turn listing, native names and
+name notifications; observation subscription remains unestablished.
+
+The independently inspected naming source was dirty on base `20480f6`, with
+plugin version `0.3.0`. The installed cache artifact reported
+`0.3.0+codex.20260912150139`; manifest, MCP environment and hook configuration
+differed. Executable source matches and deployed source matches do not settle
+those configuration differences or identify a compiled running build. Preserve
+the private capture and reconcile them with the naming workstream's final
+candidate. None of this establishes live rename propagation or UAT acceptance.
+
 Status date: 2026-09-06.  This is an evidence ledger for the normative
 [harness integration contract](HARNESS_INTEGRATION_SPEC.md), revision 1.1; it is
 not a certification claim.  Scope is the ordinary interactive `codex` plugin
