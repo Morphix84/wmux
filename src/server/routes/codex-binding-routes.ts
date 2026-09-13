@@ -16,6 +16,18 @@ const validTitle = (value: unknown): value is string =>
 
 export const codexBindingRoutes: readonly ApiRoute[] = [
   {
+    id: "codex-binding-revoke",
+    method: "POST",
+    pattern: "/api/codex-bindings/revoke",
+    policy: routePolicy("codex-binding-revoke", "POST", "/api/codex-bindings/revoke", "normal", ["helper"]),
+    handler: async ({ deps, readJsonBody, sendJson }) => {
+      const body = objectBody(await readJsonBody());
+      if (!hasOnly(body, ["sessionId", "receipts"])) throw new HttpError(400, "invalid_binding_body");
+      deps.sessions.codexTerminalBindings.revoke(body.sessionId, body.receipts);
+      sendJson(200, { revoked: true });
+    },
+  },
+  {
     id: "codex-binding-issue",
     method: "POST",
     pattern: "/api/codex-bindings",

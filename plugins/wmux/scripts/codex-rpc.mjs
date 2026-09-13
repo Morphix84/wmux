@@ -21,7 +21,7 @@ function privateSocket(socketPath) {
  * No process is spawned, thread resumed, or request/notification answered.
  * This is an observation transport, NOT a general App Server client.
  */
-export async function connectCodexObserver({ threadId, socketPath = path.join(process.env.CODEX_HOME || path.join(os.homedir(), ".codex"), "app-server-control", "app-server-control.sock") }) {
+export async function connectCodexObserver({ threadId, socketPath = process.env.WMUX_CODEX_SOCKET_PATH || path.join(process.env.CODEX_HOME || path.join(os.homedir(), ".codex"), "app-server-control", "app-server-control.sock") }) {
   if (typeof threadId !== "string" || !ID.test(threadId)) throw unavailable();
   try { privateSocket(socketPath); } catch { throw unavailable(); }
   const pending = new Map();
