@@ -113,7 +113,7 @@ test("manual pins survive sync; explicit unpin permits the current native name",
 
 test("missing, unrepresentable, child and wrong-thread names leave wmux unchanged", async t => {
   const f = await fixture(t);
-  for (const name of [null, "", "x".repeat(81), "Bad\u0000Title", " altered  whitespace "]) {
+  for (const name of [null, "", "x".repeat(513), "a" + "\u0301".repeat(4096), "Bad\u0000Title"]) {
     f.native.state.name = name; await f.call();
   }
   f.native.state.name = "Child"; f.native.state.parentThreadId = "parent";
@@ -121,6 +121,15 @@ test("missing, unrepresentable, child and wrong-thread names leave wmux unchange
   f.native.state.parentThreadId = null; f.native.state.id = "other";
   assert.equal((await f.call()).isError, true);
   assert.deepEqual(f.titles, []);
+});
+
+test("bounded long names and native whitespace mirror without rewriting", async t => {
+  const f = await fixture(t);
+  for (const name of ["x".repeat(512), " Exact  native whitespace! ", "👩‍💻".repeat(100)]) {
+    f.native.state.name = name;
+    const response = await f.call();
+    assert.equal(response.structuredContent.workspaceTitle, name);
+  }
 });
 
 test("stale receipt and absent binding fail before any native read", async t => {
