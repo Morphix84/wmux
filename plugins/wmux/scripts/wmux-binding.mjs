@@ -70,8 +70,7 @@ export function saveBinding(record) {
   finally { try { fs.unlinkSync(temp); } catch {} }
 }
 export async function withBinding(record, action) {
-  // wmux stores one semantic name per thread, even across prompt receipts.
-  // Serialize the complete store/read/mirror operation per thread.
+  // Serialize native read/mirror operations across prompt receipts and processes.
   const key = createHash("sha256").update(record.sessionId).digest("hex");
   const lock = path.join(runtimeDirectory(), `${key}.session.lock`), owner = randomUUID();
   for (let attempt = 0; attempt < 30; attempt++) {
@@ -88,6 +87,21 @@ export function promptBinding(sessionId, turnId) {
     try { const record = readJson(path.join(runtimeDirectory(), entry))?.value; if (record?.sessionId === sessionId && record.promptTurnId === turnId) matches.push(record); } catch {}
   }
   return matches.length === 1 ? valid(matches[0], sessionId, matches[0].bindingId) : null;
+}
+export async function endSessionBindings(sessionId) {
+  if (!ID.test(sessionId || "")) return;
+  const ended = [];
+  for (const entry of records().slice(0, MAX_RECORDS)) {
+    try {
+      const full = path.join(runtimeDirectory(), entry), record = readJson(full)?.value;
+      if (record?.sessionId !== sessionId) continue;
+      valid(record, sessionId, record.bindingId);
+      // Snapshot only existing receipts. A later prompt's file is never removed.
+      ended.push(record.receipt);
+      fs.unlinkSync(full);
+    } catch { /* Unsafe or expired records supply no revocation authority. */ }
+  }
+  if (ended.length) await api("/api/codex-bindings/revoke", { sessionId, receipts: ended });
 }
 function read(name) { try { return fs.readFileSync(name, "utf8").trim(); } catch { return ""; } }
 function allowedHost(hostname) {
