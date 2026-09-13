@@ -23,6 +23,6 @@ async function run() {
   process.stdout.write(JSON.stringify({ systemMessage: challenge.marker, hookSpecificOutput: { hookEventName: event, additionalContext: context + lifecycleContext } }) + "\n");
   // Lifecycle is automatic and independent of whether the model calls a naming
   // tool. Stop is not a terminal event: another hook may continue the turn.
-  try { startCodexObserver(sessionId, challenge.bindingId); } catch {}
+  try { await startCodexObserver(sessionId, challenge.bindingId); } catch {}
 }
 run().catch(() => process.stdout.write(JSON.stringify({ systemMessage: "wmux naming unavailable; continue without changing the title." }) + "\n"));

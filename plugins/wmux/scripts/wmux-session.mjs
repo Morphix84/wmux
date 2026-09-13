@@ -28,7 +28,7 @@ export async function synchronize(sessionId, bindingId) {
       nativeNameSet: false, workspaceApplied: false, tabApplied: false };
     let client;
     try {
-      client = await connectCodexObserver({ threadId: sessionId });
+      client = await connectCodexObserver({ threadId: sessionId, ...(record.socketPath ? { socketPath: record.socketPath } : {}) });
       const { thread } = await client.request("thread/read", { threadId: sessionId, includeTurns: false });
       const name = nativeTitle(thread, sessionId);
       result.nativeNameRead = true;
